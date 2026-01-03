@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Learning Games</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Grechen+Fuemen&family=LXGW+WenKai+Mono+TC:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    /* Keep existing root styles */
+    :root {
+      --background: #c6c5ff;
+      --text: #333333;
+      --accent: #2196F3;
+      --border: #e0e0e0;
+      --hover: #f5f5f5;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+        font-family: "LXGW WenKai Mono TC", serif;
+      background: #8d00ff;
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 500;
+      margin-bottom: 2rem;
+      color: #FFD93D;
+      text-align: center;
+    }
+
+    /* Grade Selection Page */
+    .grade-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 2rem;
+      margin-top: 2rem;
+      padding: 1rem;
+    }
+
+    /* 3D Button Style */
+    button {
+      position: relative;
+      display: inline-block;
+      cursor: pointer;
+      outline: none;
+      border: 0;
+      vertical-align: middle;
+      text-decoration: none;
+      font-family: inherit;
+      font-size: 15px;
+    }
+   
+    button.learn-more {
+      font-weight: 600;
+      color: #382b22;
+      text-transform: uppercase;
+      padding: 1.25em 2em;
+      background: #FFD93D;
+      border: 2px solid #b18597;
+      border-radius: 0.75em;
+      transform-style: preserve-3d;
+      transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), background 150ms cubic-bezier(0, 0, 0.58, 1);
+    }
+   
+    button.learn-more::before {
+      position: absolute;
+      content: '';
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #eec10b;
+      border-radius: inherit;
+      box-shadow: 0 0 0 2px #b18597, 0 0.625em 0 0 #ffe3e2;
+      transform: translate3d(0, 0.75em, -1em);
+      transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), box-shadow 150ms cubic-bezier(0, 0, 0.58, 1);
+    }
+   
+    button.learn-more:hover {
+      background: #eec10b;
+      transform: translate(0, 0.25em);
+    }
+   
+    button.learn-more:hover::before {
+      box-shadow: 0 0 0 2px #b18597, 0 0.5em 0 0 #ffe3e2;
+      transform: translate3d(0, 0.5em, -1em);
+    }
+   
+    button.learn-more:active {
+      background: #ffe9e9;
+      transform: translate(0em, 0.75em);
+    }
+   
+    button.learn-more:active::before {
+      box-shadow: 0 0 0 2px #b18597, 0 0 #ffe3e2;
+      transform: translate3d(0, 0, -1em);
+    }
+
+    /* Keep other existing styles */
+    .games-page {
+      display: none;
+    }
+
+    .back-button {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 0;
+      margin-bottom: 2rem;
+    }
+
+    .category {
+      margin-bottom: 3rem;
+    }
+
+    .category-title {
+      font-size: 1.5rem;
+      font-weight: 500;
+      margin-bottom: 1rem;
+    }
+
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .game-card {
+      border: 1px solid var(--border);
+      transition: all 0.2s ease;
+    }
+
+    .game-card:hover {
+      border-color: var(--accent);
+    }
+
+    .game-image {
+      width: 100%;
+      height: 200px;
+      object-fit: cover;
+    }
+
+    .game-content {
+      padding: 1rem;
+    }
+
+    .game-title {
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .play-button {
+      width: 100%;
+      padding: 0.5rem;
+      background: var(--accent);
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+
+    .play-button:hover {
+      opacity: 0.9;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content {
+      position: relative;
+      background: var(--background);
+      width: 90%;
+      max-width: 500px;
+      margin: 4rem auto;
+      padding: 2rem;
+    }
+
+    .close-modal {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+
+    .modal-image {
+      width: 100%;
+      height: auto;
+      margin-bottom: 1rem;
+    }
+
+    .modal-text {
+      margin-bottom: 1rem;
+    }
+    img#grade{
+        margin: 0;
+        width: 30vw;
+        height: 40vh;
+    }
+    .container h1{
+        font-size: 10vh;
+    }
+    #side{
+        width: 20vw;
+        justify-content: center;
+        align-items: center;
+        padding-top: 10vh;
+    }
+    .container{
+        width: 75vw;
+    }
+    #main{
+        width: 100%;
+        height: 100vh;
+        gap:5vw;
+        display: flex;
+        justify-content: center;
+        padding-top: 10vh;
+
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Grade Selection Page -->
+  <div id="main">
+    <div id="side"><img id="grade"src="kidwap1.png" alt=""></div>
+  <div id="gradePage" class="container">
+    <h1>Select Grade</h1>
+    <div class="grade-grid">
+      <button class="learn-more" data-grade="KG">Kindergarten</button>
+      <button class="learn-more" data-grade="1">Grade 1</button>
+      <button class="learn-more" data-grade="2">Grade 2</button>
+      <button class="learn-more" data-grade="3">Grade 3</button>
+      <button class="learn-more" data-grade="4">Grade 4</button>
+      <button class="learn-more" data-grade="5">Grade 5</button>
+      <button class="learn-more" data-grade="6">Grade 6</button>
+    </div>
+  </div>
+
+  <!-- Games Page -->
+  <div id="gamesPage" class="games-page">
+    <div class="container">
+      <button class="back-button">← Back</button>
+      <div id="gamesContainer"></div>
+    </div>
+  </div>
+
+  <!-- Game Modal -->
+  <div id="gameModal" class="modal">
+    <div class="modal-content">
+      <button class="close-modal">&times;</button>
+      <img id="modalImage" class="modal-image" src="" alt="Game">
+      <p id="modalText" class="modal-text"></p>
+      <button id="modalPlayButton" class="play-button">Play Now</button>
+    </div>
+  </div>
+  </div>
+
+  <script>
+    const baseUrl = 'http://192.168.137.184:8080';
+    const categories = ['Math', 'GK', 'Reasoning', 'Reading'];
+
+    // Updated grade selection to use new button class
+    document.querySelectorAll('.learn-more').forEach(button => {
+      button.addEventListener('click', () => {
+        const grade = button.getAttribute('data-grade');
+        document.getElementById('gradePage').style.display = 'none';
+        document.getElementById('side').style.display = 'none';
+
+        document.getElementById('gamesPage').style.display = 'block';
+        
+        loadGames(grade);
+      });
+    });
+
+    // Rest of the JavaScript remains the same
+    document.querySelector('.back-button').addEventListener('click', () => {
+      document.getElementById('gamesPage').style.display = 'none';
+      document.getElementById('gradePage').style.display = 'block';
+      document.getElementById('side').style.display = 'block';
+    });
+
+    function loadGames(grade) {
+      const container = document.getElementById('gamesContainer');
+      container.innerHTML = '';
+
+      categories.forEach(category => {
+        const section = document.createElement('div');
+        section.className = 'category';
+        
+        section.innerHTML = `
+          <h2 class="category-title">${category}</h2>
+          <div class="games-grid" id="${category}-games"></div>
+        `;
+        
+        container.appendChild(section);
+        
+        fetch(`${baseUrl}/games/standard/${grade}/category/${category}`)
+          .then(response => response.json())
+          .then(games => {
+            const gamesGrid = document.getElementById(`${category}-games`);
+            
+            if (games.length === 0) {
+              gamesGrid.innerHTML = '<p>No games available</p>';
+              return;
+            }
+
+            games.forEach(game => {
+              const gameCard = document.createElement('div');
+              gameCard.className = 'game-card';
+              gameCard.innerHTML = `
+                <img class="game-image" src="${game.imageUrl}" 
+                     onerror="this.src='https://via.placeholder.com/300x200?text=Game'"
+                     alt="${game.category}">
+                <div class="game-content">
+                  <h3 class="game-title">${game.category}</h3>
+                  <button class="play-button" data-game='${JSON.stringify(game)}'>Play</button>
+                </div>
+              `;
+              gamesGrid.appendChild(gameCard);
+            });
+          })
+          .catch(error => {
+            console.error('Error loading games:', error);
+            document.getElementById(`${category}-games`).innerHTML = 
+              '<p>Error loading games</p>';
+          });
+      });
+    }
+
+    const modal = document.getElementById('gameModal');
+    const modalImage = document.getElementById('modalImage');
+    const modalText = document.getElementById('modalText');
+    const modalPlayButton = document.getElementById('modalPlayButton');
+
+    document.addEventListener('click', e => {
+      if (e.target.classList.contains('play-button') && !e.target.id) {
+        const game = JSON.parse(e.target.getAttribute('data-game'));
+        modalImage.src = game.imageUrl;
+        modalText.textContent = game.text;
+        modalPlayButton.onclick = () => window.location.href = game.gameUrl;
+        modal.style.display = 'block';
+      }
+    });
+
+    document.querySelector('.close-modal').onclick = () => {
+      modal.style.display = 'none';
+    };
+
+    window.onclick = e => {
+      if (e.target === modal) {
+        modal.style.display = 'none';
+      }
+    };
+  </script>
+</body>
+</html>

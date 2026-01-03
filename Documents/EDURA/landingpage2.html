@@ -1,0 +1,995 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Edura - Fun Learning Games</title>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/aos/2.3.4/aos.css" rel="stylesheet">
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+                font-family: 'Arial', sans-serif;
+            }
+
+            body {
+                background: #8d00ff;
+                overflow-x: hidden;
+            }
+/* From Uiverse.io by ilkhoeri */ 
+.wrapper {
+    width: 100vw;
+    height: 60vh;
+    position: relative;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  
+  .inner {
+    --w: 100px;
+    --h: 150px;
+    --translateZ: calc((var(--w) + var(--h)) + 0px);
+    --rotateX: -15deg;
+    --perspective: 1000px;
+    position: absolute;
+    width: var(--w);
+    height: var(--h);
+    top: 25%;
+    left: calc(50% - (var(--w) / 2) - 2.5px);
+    z-index: 2;
+    transform-style: preserve-3d;
+    transform: perspective(var(--perspective));
+    animation: rotating 20s linear infinite; /* */
+  }
+  @keyframes rotating {
+    from {
+      transform: perspective(var(--perspective)) rotateX(var(--rotateX))
+        rotateY(0);
+    }
+    to {
+      transform: perspective(var(--perspective)) rotateX(var(--rotateX))
+        rotateY(1turn);
+    }
+  }
+  
+  .card {
+    position: absolute;
+    border: 2px solid rgba(var(--color-card));
+    border-radius: 12px;
+    overflow: hidden;
+    inset: 0;
+    transform: rotateY(calc((360deg / var(--quantity)) * var(--index)))
+      translateZ(var(--translateZ));
+  }
+  
+  .img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #0000
+      radial-gradient(
+        circle,
+        rgba(var(--color-card), 0.2) 0%,
+        rgba(var(--color-card), 0.6) 80%,
+        rgba(var(--color-card), 0.9) 100%
+      );
+  }
+  
+            .banner {
+                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+                height: 90vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .banner::after {
+                content: '';
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                background: url('/api/placeholder/1200/800') center/cover;
+                opacity: 0.1;
+                animation: pulse 4s infinite;
+            }
+
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.02); }
+                100% { transform: scale(1); }
+            }
+
+            .banner-content {
+                text-align: center;
+                color: white;
+                z-index: 1;
+                padding: 20px;
+            }
+
+            .banner-content h1 {
+                font-size: 4rem;
+                margin-bottom: 20px;
+                animation: slideIn 1s ease-out;
+            }
+
+            .banner-content p {
+                font-size: 1.5rem;
+                margin-bottom: 30px;
+            }
+
+            .cta-button {
+                padding: 15px 30px;
+                font-size: 1.2rem;
+                background: #FFD93D;
+                color: #333;
+                border: none;
+                border-radius: 30px;
+                cursor: pointer;
+                transition: transform 0.3s ease;
+            }
+
+            .cta-button:hover {
+                transform: scale(1.05);
+            }
+
+            .categories {
+                padding: 50px 20px;
+            }
+
+            .category-section {
+                max-width: 1400px;
+                margin: 50px auto;
+            }
+
+            .category-title {
+                text-align: center;
+                font-size: 2.5rem;
+                color: #e4dada;
+                margin-bottom: 30px;
+            }
+
+            .games-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 25px;
+                padding: 20px;
+            }
+
+            .game-card {
+                background: white;
+                border-radius: 15px;
+                padding: 20px;
+                box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+                cursor: pointer;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                transform-style: preserve-3d;
+                transform: perspective(1000px);
+            }
+
+            .game-card:hover {
+                transform: perspective(1000px) translateZ(50px) rotateX(5deg) rotateY(5deg);
+                box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+            }
+
+            .game-card::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                border-radius: 15px;
+                background: linear-gradient(45deg, transparent, rgba(255,255,255,0.5));
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            }
+
+            .game-card:hover::before {
+                opacity: 1;
+            }
+
+            .game-icon {
+                width: 80px;
+                height: 80px;
+                margin: 0 auto 15px;
+                background: #f8f9fa;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 2rem;
+                transition: transform 0.3s ease;
+            }
+
+            .game-card:hover .game-icon {
+                transform: scale(1.1) translateZ(20px);
+            }
+
+            .game-title {
+                font-size: 1.4rem;
+                color: #333;
+                margin-bottom: 10px;
+                text-align: center;
+            }
+
+            .game-description {
+                color: #666;
+                font-size: 0.9rem;
+                text-align: center;
+                line-height: 1.4;
+            }
+
+            .difficulty {
+                margin-top: 15px;
+                padding: 5px 10px;
+                background: #FFD93D;
+                color: #333;
+                border-radius: 15px;
+                font-size: 0.8rem;
+                display: inline-block;
+                position: absolute;
+                bottom: 15px;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            .category-nav {
+                display: flex;
+                justify-content: center;
+                gap: 20px;
+                margin-bottom: 40px;
+                flex-wrap: wrap;
+            }
+            .banner {
+                position: relative;
+                height: 70vh;
+                overflow: hidden;
+                background: linear-gradient(45deg, rgba(255,107,107,0.9), rgba(78,205,196,0.9));
+            }
+
+            .banner-iframe {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                border: none;
+                z-index: 0;
+            }
+
+            .banner-content {
+                position: relative;
+                z-index: 2;
+                text-align: center;
+                color: white;
+                padding-top: 400px;
+                padding: 20px;
+                
+                border-radius: 20px;
+                
+            }
+
+            /* Enhanced game card styles */
+            .game-card {
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 20px;
+                padding: 25px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                cursor: pointer;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                transform-style: preserve-3d;
+                transform: perspective(1000px);
+                overflow: hidden;
+            }
+
+            .game-card::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.4) 50%, transparent 70%);
+                transform: translateX(-100%);
+                transition: transform 0.6s ease;
+            }
+
+            .game-card:hover::after {
+                transform: translateX(100%);
+            }
+
+            .game-icon {
+                transform-style: preserve-3d;
+                transition: transform 0.5s ease;
+            }
+
+            .game-card:hover .game-icon {
+                transform: translateZ(50px) scale(1.2);
+            }
+
+            .difficulty {
+                background: linear-gradient(45deg, #FFD93D, #FFA41B);
+                padding: 8px 15px;
+                border-radius: 20px;
+                font-weight: bold;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            }
+
+            /* Add shimmer effect */
+            @keyframes shimmer {
+                0% { background-position: -200% 0; }
+                100% { background-position: 200% 0; }
+            }
+
+            .game-card:hover {
+                background: linear-gradient(90deg, 
+                    rgba(255,255,255,0.95), 
+                    rgba(255,255,255,0.98), 
+                    rgba(255,255,255,0.95));
+                background-size: 200% 100%;
+                animation: shimmer 2s infinite;
+            }
+            .category-button {
+                padding: 12px 25px;
+                border: none;
+                border-radius: 25px;
+                background: white;
+                color: #333;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+
+            .category-button:hover {
+                background: #FFD93D;
+                transform: translateY(-2px);
+            }
+
+            .category-button.active {
+                background: #FFD93D;
+            }
+
+            @media (max-width: 768px) {
+                .banner-content h1 {
+                    font-size: 2.5rem;
+                }
+                
+                .banner-content p {
+                    font-size: 1.2rem;
+                }
+                
+                .games-grid {
+                    grid-template-columns: 1fr;
+                }
+
+                .category-title {
+                    font-size: 2rem;
+                }
+            }
+            .navbar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: rgb(255 168 30);
+                padding: 15px 30px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                z-index: 1000;
+                backdrop-filter: blur(10px);
+                height: 10vh;
+            }
+
+            .logo-container {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .logo {
+                font-size: 2rem;
+                font-weight: bold;
+                color: #333;
+                text-decoration: none;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .logo-icon {
+                width: 40px;
+                height: 40px;
+                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-size: 1.5rem;
+                transform: rotate(-10deg);
+                transition: transform 0.3s ease;
+            }
+
+            .logo:hover .logo-icon {
+                transform: rotate(0deg);
+            }
+
+            .nav-links {
+                display: flex;
+                gap: 30px;
+                align-items: center;
+            }
+
+            .nav-link {
+                color: #333;
+                text-decoration: none;
+                font-size: 1.1rem;
+                font-weight: 500;
+                padding: 5px 10px;
+                border-radius: 20px;
+                transition: all 0.3s ease;
+            }
+
+            .nav-link:hover {
+                background: rgba(255, 217, 61, 0.2);
+                color: #FF6B6B;
+            }
+
+            .nav-button {
+                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 25px;
+                border: none;
+                font-size: 1rem;
+                cursor: pointer;
+                transition: transform 0.3s ease;
+            }
+
+            .nav-button:hover {
+                transform: translateY(-2px);
+            }
+
+            .mobile-menu-button {
+                display: none;
+                background: none;
+                border: none;
+                font-size: 1.5rem;
+                cursor: pointer;
+                padding: 5px;
+            }
+            h2{
+                color: rgb(255 168 30);
+            }
+            /* From Uiverse.io by vinodjangid07 */ 
+.button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 10px;
+    background-color: #006aff;
+    border: 8px solid #c0dfff;
+    color: white;
+    gap: 8px;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.3s;
+    overflow: hidden;
+  }
+  .text {
+    font-size: 1.7em;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .svg {
+    padding-top: 5px;
+    height: 100%;
+    width: fit-content;
+  }
+  .svg svg {
+    width: 50px;
+    height: 30px;
+  }
+  .button:hover {
+    border: 2px solid #b1d8ff;
+    background-color: #1b7aff;
+  }
+  .button:active {
+    border: 5px solid #c0dfff;
+  }
+  .button:hover .svg svg {
+    animation: jello-vertical 0.9s both;
+    transform-origin: left;
+  }
+  
+  @keyframes jello-vertical {
+    0% {
+      transform: scale3d(1, 1, 1);
+    }
+    30% {
+      transform: scale3d(0.75, 1.25, 1);
+    }
+    40% {
+      transform: scale3d(1.25, 0.75, 1);
+    }
+    50% {
+      transform: scale3d(0.85, 1.15, 1);
+    }
+    65% {
+      transform: scale3d(1.05, 0.95, 1);
+    }
+    75% {
+      transform: scale3d(0.95, 1.05, 1);
+    }
+    100% {
+      transform: scale3d(1, 1, 1);
+    }
+  }
+  
+h1{
+    color: #FFD93D;
+}
+            @media (max-width: 768px) {
+                .nav-links {
+                    display: none;
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    right: 0;
+                    background: white;
+                    padding: 20px;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 20px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                }
+
+                .nav-links.active {
+                    display: flex;
+                }
+
+                .mobile-menu-button {
+                    display: block;
+                }
+            }
+
+            /* Adjust banner to account for navbar */
+            .banner {
+                margin-top: 70px;
+            }
+        </style>
+    </head>
+    <body>
+        
+        <nav class="navbar">
+            <div class="logo-container">
+                <a href="#" class="logo">
+                    <div class="logo-icon">E</div>
+                    <span>Edura</span>
+                </a>
+            </div>
+            <button class="mobile-menu-button">☰</button>
+            <div class="nav-links">
+                <a href="#" class="nav-link">Home</a>
+                <a href="#" class="nav-link">Games</a>
+                <a href="#" class="nav-link">About</a>
+                <a href="#" class="nav-link">Parents</a>
+                <!-- From Uiverse.io by vinodjangid07 --> 
+<button class="button">
+    <span class="text">Play Now</span>
+    <span class="svg">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="50"
+        height="20"
+        viewBox="0 0 38 15"
+        fill="none"
+      >
+        <path
+          fill="white"
+          d="M10 7.519l-.939-.344h0l.939.344zm14.386-1.205l-.981-.192.981.192zm1.276 5.509l.537.843.148-.094.107-.139-.792-.611zm4.819-4.304l-.385-.923h0l.385.923zm7.227.707a1 1 0 0 0 0-1.414L31.343.448a1 1 0 0 0-1.414 0 1 1 0 0 0 0 1.414l5.657 5.657-5.657 5.657a1 1 0 0 0 1.414 1.414l6.364-6.364zM1 7.519l.554.833.029-.019.094-.061.361-.23 1.277-.77c1.054-.609 2.397-1.32 3.629-1.787.617-.234 1.17-.392 1.623-.455.477-.066.707-.008.788.034.025.013.031.021.039.034a.56.56 0 0 1 .058.235c.029.327-.047.906-.39 1.842l1.878.689c.383-1.044.571-1.949.505-2.705-.072-.815-.45-1.493-1.16-1.865-.627-.329-1.358-.332-1.993-.244-.659.092-1.367.305-2.056.566-1.381.523-2.833 1.297-3.921 1.925l-1.341.808-.385.245-.104.068-.028.018c-.011.007-.011.007.543.84zm8.061-.344c-.198.54-.328 1.038-.36 1.484-.032.441.024.94.325 1.364.319.45.786.64 1.21.697.403.054.824-.001 1.21-.09.775-.179 1.694-.566 2.633-1.014l3.023-1.554c2.115-1.122 4.107-2.168 5.476-2.524.329-.086.573-.117.742-.115s.195.038.161.014c-.15-.105.085-.139-.076.685l1.963.384c.192-.98.152-2.083-.74-2.707-.405-.283-.868-.37-1.28-.376s-.849.069-1.274.179c-1.65.43-3.888 1.621-5.909 2.693l-2.948 1.517c-.92.439-1.673.743-2.221.87-.276.064-.429.065-.492.057-.043-.006.066.003.155.127.07.099.024.131.038-.063.014-.187.078-.49.243-.94l-1.878-.689zm14.343-1.053c-.361 1.844-.474 3.185-.413 4.161.059.95.294 1.72.811 2.215.567.544 1.242.546 1.664.459a2.34 2.34 0 0 0 .502-.167l.15-.076.049-.028.018-.011c.013-.008.013-.008-.524-.852l-.536-.844.019-.012c-.038.018-.064.027-.084.032-.037.008.053-.013.125.056.021.02-.151-.135-.198-.895-.046-.734.034-1.887.38-3.652l-1.963-.384zm2.257 5.701l.791.611.024-.031.08-.101.311-.377 1.093-1.213c.922-.954 2.005-1.894 2.904-2.27l-.771-1.846c-1.31.547-2.637 1.758-3.572 2.725l-1.184 1.314-.341.414-.093.117-.025.032c-.01.013-.01.013.781.624zm5.204-3.381c.989-.413 1.791-.42 2.697-.307.871.108 2.083.385 3.437.385v-2c-1.197 0-2.041-.226-3.19-.369-1.114-.139-2.297-.146-3.715.447l.771 1.846z"
+        ></path>
+      </svg>
+    </span>
+  </button>
+  
+            </div>
+        </nav>
+
+        <div class="banner">
+            <!-- Replace with actual iframe in production -->
+            <iframe class="banner-iframe" src="https://www.mindlygames.com/games/banner/index.html" title="Interactive Banner"></iframe>
+            <div class="banner-content">
+                <h1>Welcome to Edura</h1>
+                <p>Where Learning Becomes an Adventure!</p>
+                <button class="cta-button">Start Playing & Learning</button>
+            </div>
+        </div>
+
+        <div class="categories">
+            <div class="category-nav">
+                <button class="category-button active">Reading Games</button>
+                <button class="category-button">Math Games</button>
+                <button class="category-button">GK Games</button>
+            </div>
+            <div class="category-section" style="display: none;">
+                <h2 class="category-title">Math Magic</h2>
+                <div class="games-grid">
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon"></div>
+                        <h3 class="game-title">Number Ninja</h3>
+                        <p class="game-description">Master basic arithmetic with ninja-speed challenges.</p>
+                        <span class="difficulty">Grade 1</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎲</div>
+                        <h3 class="game-title">Fraction Fun</h3>
+                        <p class="game-description">Learn fractions through interactive pizza-making games.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🔷</div>
+                        <h3 class="game-title">Shape Explorer</h3>
+                        <p class="game-description">Discover geometric shapes in a 3D world.</p>
+                        <span class="difficulty">Grade 2</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎮</div>
+                        <h3 class="game-title">Math Runner</h3>
+                        <p class="game-description">Solve equations while running through obstacles.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌟</div>
+                        <h3 class="game-title">Times Tables Hero</h3>
+                        <p class="game-description">Master multiplication with superhero powers.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎨</div>
+                        <h3 class="game-title">Pattern Artist</h3>
+                        <p class="game-description">Create and solve mathematical patterns.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎪</div>
+                        <h3 class="game-title">Decimal Circus</h3>
+                        <p class="game-description">Learn decimals through circus performances.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🏰</div>
+                        <h3 class="game-title">Algebra Castle</h3>
+                        <p class="game-description">Introduction to algebra in a medieval setting.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🚀</div>
+                        <h3 class="game-title">Space Math</h3>
+                        <p class="game-description">Solve math problems in outer space.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎭</div>
+                        <h3 class="game-title">Math Theater</h3>
+                        <p class="game-description">Learn math through storytelling and drama.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                </div>
+            </div>
+        
+            <!-- GK Games Section -->
+            <div class="category-section" style="display: none;">
+                <h2 class="category-title">General Knowledge</h2>
+                <div class="games-grid">
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌍</div>
+                        <h3 class="game-title">World Explorer</h3>
+                        <p class="game-description">Discover fascinating facts about different countries.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🦁</div>
+                        <h3 class="game-title">Animal Kingdom</h3>
+                        <p class="game-description">Learn about wildlife and their habitats.</p>
+                        <span class="difficulty">Grade 1</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🔬</div>
+                        <h3 class="game-title">Science Lab</h3>
+                        <p class="game-description">Explore basic scientific concepts through experiments.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎨</div>
+                        <h3 class="game-title">Art & Culture</h3>
+                        <p class="game-description">Explore world cultures through art and music.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌿</div>
+                        <h3 class="game-title">Nature Detective</h3>
+                        <p class="game-description">Learn about plants and ecosystems.</p>
+                        <span class="difficulty">Grade 2</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">⚡</div>
+                        <h3 class="game-title">Tech Wizard</h3>
+                        <p class="game-description">Discover how technology works.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🏺</div>
+                        <h3 class="game-title">History Hunter</h3>
+                        <p class="game-description">Travel through time to learn about history.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎭</div>
+                        <h3 class="game-title">Famous Faces</h3>
+                        <p class="game-description">Learn about important historical figures.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌡️</div>
+                        <h3 class="game-title">Weather Watch</h3>
+                        <p class="game-description">Understanding weather and climate.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎪</div>
+                        <h3 class="game-title">Quiz Circus</h3>
+                        <p class="game-description">Test your knowledge in this fun quiz show.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                </div>
+            </div>
+            <div class="category-section">
+                <h2 class="category-title">Reading Adventures</h2>
+                <div class="games-grid">
+                    <!-- Reading Games -->
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">📚</div>
+                        <h3 class="game-title">Word Quest</h3>
+                        <p class="game-description">Embark on a magical journey to discover new words and their meanings.</p>
+                        <span class="difficulty">Kindergarten</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎯</div>
+                        <h3 class="game-title">Phonics Fun</h3>
+                        <p class="game-description">Master letter sounds through interactive mini-games.</p>
+                        <span class="difficulty">Grade 1</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🏰</div>
+                        <h3 class="game-title">Story Castle</h3>
+                        <p class="game-description">Build comprehension skills with interactive storytelling.</p>
+                        <span class="difficulty">Grade 2</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎭</div>
+                        <h3 class="game-title">Grammar Theater</h3>
+                        <p class="game-description">Learn grammar rules through fun dramatic scenarios.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎨</div>
+                        <h3 class="game-title">Vocabulary Artist</h3>
+                        <p class="game-description">Paint your way through vocabulary challenges.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎪</div>
+                        <h3 class="game-title">Reading Circus</h3>
+                        <p class="game-description">Join the circus of reading comprehension adventures.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌟</div>
+                        <h3 class="game-title">Poetry Stars</h3>
+                        <p class="game-description">Explore the magical world of poetry and rhymes.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎮</div>
+                        <h3 class="game-title">Speed Reader</h3>
+                        <p class="game-description">Improve reading speed with fun arcade-style games.</p>
+                        <span class="difficulty">Grade 6</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎲</div>
+                        <h3 class="game-title">Word Builder</h3>
+                        <p class="game-description">Construct words and sentences in this building game.</p>
+                        <span class="difficulty">Grade 4</span>
+                    </div>
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🎯</div>
+                        <h3 class="game-title">Reading Quest</h3>
+                        <p class="game-description">Embark on epic reading adventures with fun challenges.</p>
+                        <span class="difficulty">Grade 5</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="category-section" style="display: none;">
+                <h2 class="category-title">Math Magic</h2>
+                <div class="games-grid">
+                    <!-- Math Games -->
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🔢</div>
+                        <h3 class="game-title">Number Ninja</h3>
+                        <p class="game-description">Master basic arithmetic with ninja-speed challenges.</p>
+                        <span class="difficulty">Grade 1</span>
+                    </div>
+                    <!-- Add 9 more math games following the same pattern -->
+                </div>
+            </div>
+
+            <div class="category-section" style="display: none;">
+                <h2 class="category-title">General Knowledge</h2>
+                <div class="games-grid">
+                    <!-- GK Games -->
+                    <div class="game-card" data-tilt>
+                        <div class="game-icon">🌍</div>
+                        <h3 class="game-title">World Explorer</h3>
+                        <p class="game-description">Discover fascinating facts about different countries.</p>
+                        <span class="difficulty">Grade 3</span>
+                    </div>
+                    <!-- Add 9 more GK games following the same pattern -->
+                </div>
+            </div>
+        </div>
+        <div class="wrapper">
+            <div class="inner" style="--quantity: 10;">
+              <div class="card" style="--index: 0;--color-card: 142, 249, 252;">
+                <div class="img"><img src="bg.png" alt=""></div>
+              </div>
+              <div class="card" style="--index: 1;--color-card: 142, 252, 204;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 2;--color-card: 142, 252, 157;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 3;--color-card: 215, 252, 142;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 4;--color-card: 252, 252, 142;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 5;--color-card: 252, 208, 142;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 6;--color-card: 252, 142, 142;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 7;--color-card: 252, 142, 239;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 8;--color-card: 204, 142, 252;">
+                <div class="img"></div>
+              </div>
+              <div class="card" style="--index: 9;--color-card: 142, 202, 252;">
+                <div class="img"></div>
+              </div>
+            </div>
+          </div>
+          
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/aos/2.3.4/aos.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.7.0/vanilla-tilt.min.js"></script>
+        <script>
+            AOS.init({
+                duration: 1000,
+                once: true
+            });
+
+            // Initialize tilt effect on game cards
+            VanillaTilt.init(document.querySelectorAll(".game-card"), {
+                max: 15,
+                speed: 400,
+                glare: true,
+                "max-glare": 0.2,
+            });
+            document.addEventListener('DOMContentLoaded', function() {
+                const mobileMenuButton = document.querySelector('.mobile-menu-button');
+                const navLinks = document.querySelector('.nav-links');
+
+                mobileMenuButton.addEventListener('click', () => {
+                    navLinks.classList.toggle('active');
+                });
+
+                // Close mobile menu when clicking outside
+                document.addEventListener('click', (event) => {
+                    if (!event.target.closest('.navbar')) {
+                        navLinks.classList.remove('active');
+                    }
+                });
+
+                // Navbar scroll effect
+                let lastScroll = 0;
+                window.addEventListener('scroll', () => {
+                    const navbar = document.querySelector('.navbar');
+                    const currentScroll = window.pageYOffset;
+
+                    if (currentScroll <= 0) {
+                        navbar.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+                        return;
+                    }
+
+                    if (currentScroll > lastScroll) {
+                        // Scrolling down
+                        navbar.style.transform = 'translateY(-100%)';
+                    } else {
+                        // Scrolling up
+                        navbar.style.transform = 'translateY(0)';
+                        navbar.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.2)';
+                    }
+
+                    lastScroll = currentScroll;
+                });
+            });
+            document.addEventListener('DOMContentLoaded', function() {
+                // In production, replace 'about:blank' with actual URL
+                const bannerIframe = document.querySelector('.banner-iframe');
+                bannerIframe.src = 'https://www.mindlygames.com/games/banner/index.html';
+            })
+            // Category switching functionality
+            const categoryButtons = document.querySelectorAll('.category-button');
+            const categorySections = document.querySelectorAll('.category-section');
+
+            categoryButtons.forEach((button, index) => {
+                button.addEventListener('click', () => {
+                    // Update active button
+                    categoryButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    // Show corresponding section
+                    categorySections.forEach(section => section.style.display = 'none');
+                    categorySections[index].style.display = 'block';
+                });
+            });
+
+            // Add hover interaction between cards
+            const gameCards = document.querySelectorAll('.game-card');
+            gameCards.forEach(card => {
+                card.addEventListener('mouseenter', () => {
+                    gameCards.forEach(otherCard => {
+                        if (otherCard !== card) {
+                            otherCard.style.transform = 'scale(0.98)';
+                        }
+                    });
+                });
+
+                card.addEventListener('mouseleave', () => {
+                    gameCards.forEach(otherCard => {
+                        otherCard.style.transform = 'none';
+                    });
+                });
+            });
+        </script>
+    </body>
+    </html>

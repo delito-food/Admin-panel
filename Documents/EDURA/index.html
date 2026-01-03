@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kids Learning App</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .form-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            background-color: #1a73e8;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .children-container {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+
+        .add-child-btn {
+            background-color: #34a853;
+            margin-bottom: 20px;
+        }
+
+        .remove-child-btn {
+            background-color: #ea4335;
+            margin-top: 10px;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f8f9fa;
+            border: none;
+            margin-right: 10px;
+        }
+
+        .tab.active {
+            background-color: #1a73e8;
+            color: white;
+        }
+
+        .form-section {
+            display: none;
+        }
+
+        .form-section.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="tabs">
+            <button class="tab active" onclick="showForm('login')">Login</button>
+            <button class="tab" onclick="showForm('register')">Register</button>
+        </div>
+
+        <!-- Login Form -->
+        <div id="loginForm" class="form-section active form-container">
+            <h2>Login</h2>
+            <form onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="loginUsername">Username</label>
+                    <input type="text" id="loginUsername" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+
+        <!-- Registration Form -->
+        <div id="registerForm" class="form-section form-container">
+            <h2>Parent Registration</h2>
+            <form onsubmit="handleRegistration(event)">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="fullName">Full Name</label>
+                    <input type="text" id="fullName" required>
+                </div>
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+
+                <h3>Children</h3>
+                <div id="childrenList"></div>
+                <button type="button" class="add-child-btn" onclick="addChild()">Add Child</button>
+                <button type="submit">Register</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function showForm(formType) {
+            document.querySelectorAll('.form-section').forEach(form => form.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            
+            document.getElementById(`${formType}Form`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function createChildForm() {
+            const childDiv = document.createElement('div');
+            childDiv.className = 'children-container';
+            
+            const childContent = `
+                <div class="form-group">
+                    <label>Child Username</label>
+                    <input type="text" class="child-username" required>
+                </div>
+                <div class="form-group">
+                    <label>Child Name</label>
+                    <input type="text" class="child-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Child Password</label>
+                    <input type="password" class="child-password" required>
+                </div>
+                <div class="form-group">
+                    <label>Child Age</label>
+                    <input type="number" class="child-age" required min="1" max="17">
+                </div>
+                <button type="button" class="remove-child-btn">Remove Child</button>
+            `;
+            
+            childDiv.innerHTML = childContent;
+            
+            // Add event listener to the remove button
+            const removeButton = childDiv.querySelector('.remove-child-btn');
+            removeButton.addEventListener('click', function() {
+                childDiv.remove();
+            });
+            
+            return childDiv;
+        }
+
+        function addChild() {
+            const childrenList = document.getElementById('childrenList');
+            const childElement = createChildForm();
+            childrenList.appendChild(childElement);
+        }
+
+        function handleLogin(event) {
+            event.preventDefault();
+            
+            const loginData = {
+                username: document.getElementById('loginUsername').value,
+                password: document.getElementById('loginPassword').value
+            };
+
+            fetch('http://192.168.137.184:8080/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(loginData)
+            })
+            .then(response => response.text())
+            .then(token => {
+                if (token !== "failure") {
+                    localStorage.setItem('token', token);
+                    alert('Login successful!');
+                } else {
+                    alert('Login failed. Please check your credentials.');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred during login.');
+            });
+        }
+
+        function handleRegistration(event) {
+            event.preventDefault();
+            
+            const children = [];
+            document.querySelectorAll('.children-container').forEach(childDiv => {
+                children.push({
+                    username: childDiv.querySelector('.child-username').value,
+                    name: childDiv.querySelector('.child-name').value,
+                    password: childDiv.querySelector('.child-password').value,
+                    age: parseInt(childDiv.querySelector('.child-age').value)
+                });
+            });
+
+            const registrationData = {
+                username: document.getElementById('username').value,
+                fullName: document.getElementById('fullName').value,
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                children: children
+            };
+
+            fetch('http://192.168.137.184:8080/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(registrationData)
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert('Registration successful!');
+                    document.querySelector('form').reset();
+                    document.getElementById('childrenList').innerHTML = '';
+                } else {
+                    alert('Registration failed. Please try again.');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred during registration.');
+            });
+        }
+    </script>
+</body>
+</html>

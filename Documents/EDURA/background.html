@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parent Registration</title>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.0.0/fonts/remixicon.css" rel="stylesheet"/>
+    <style>
+        @font-face {
+            font-family: 'TAN-MERINGUE';
+            src: url('TAN-MERINGUE.otf') format('opentype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        a{
+            text-decoration: none;
+            color: #8ccdb0;
+            }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-image: url("bg.png");
+            background-repeat: no-repeat;
+            background-size: cover;
+            font-family: 'TAN-MERINGUE', sans-serif;
+            overflow: hidden;
+        }
+        .container{
+            width: 100vw;
+            height: 100vh;
+        }
+        #form-container{
+            width: 34vw;
+            height: 84vh;
+            transform: translate(23vw, 2vh);
+            padding: 20px;
+            padding-top: 5vh;
+            background-color: transparent;
+            border-radius: 15px;
+            
+        }
+        .form-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+            
+        input:focus {
+            box-shadow: 0 0 10px #8ccdb0;
+            
+            outline:rgba(241, 105, 142, 0.7);
+        }
+        input {
+            width: 90%;
+            padding: 10px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 8px;
+            background-color: #8ccdb0;
+            height: 7vh;
+            padding-left: 40px;
+        }
+        .form-group i {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #333;
+        }
+        button {
+            padding: 10px 20px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .add-children {
+            background-color: #fbae4c;
+            width: 48%;
+            height: 7vh;
+        }
+        .register {
+            background-color: #f1698e;
+            color: white;
+            width: 40%;
+            height: 7vh;
+        }
+        form{
+            margin-top: 4vh;
+        }
+        p#lower{
+            padding-top: 5vh;
+        }
+        h1{
+            margin-top: 5vh;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="form-container">
+            <h1>Parent Registration</h1>
+            <form action="#" method="post">
+                <div class="form-group">
+                    <i class="ri-user-3-fill"></i>
+                    <input type="text" placeholder="Username" required>
+                </div>
+                <div class="form-group">
+                    <i class="ri-user-fill"></i>
+                    <input type="text" placeholder="Full Name" required>
+                </div>
+                <div class="form-group">
+                    <i class="ri-mail-fill"></i>
+                    <input type="email" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <i class="ri-lock-fill"></i>
+                    <input type="password" placeholder="Password" required>
+                </div>
+                <button type="button" class="add-children"><i class="ri-user-add-fill"></i> Add Children</button>
+                <button type="submit" class="register"><i class="ri-user-3-fill"></i> Register</button>
+                <p id="lower">Already Registered? <a href="#">Login</a></p>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
