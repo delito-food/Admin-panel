@@ -96,6 +96,7 @@ const navigation: NavItem[] = [
         icon: <BarChart3 size={20} />,
         children: [
             { label: 'Overview', href: '/reports' },
+            { label: 'GST Report', href: '/reports/gst' },
             { label: 'Advanced Analytics', href: '/reports/advanced' },
         ],
     },
