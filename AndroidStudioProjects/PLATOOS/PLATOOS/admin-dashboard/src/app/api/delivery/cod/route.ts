@@ -6,12 +6,12 @@ export async function GET() {
     try {
         // Get all delivery partners
         const deliverySnapshot = await db.collection(collections.deliveryPersons).get();
-        
+
         // Get all orders with COD
         const ordersSnapshot = await db.collection(collections.orders)
             .where('paymentMode', 'in', ['COD', 'cod', 'Cash', 'cash'])
             .get();
-        
+
         // Get COD settlement history
         const settlementsSnapshot = await db.collection('codSettlements')
             .orderBy('createdAt', 'desc')
@@ -29,7 +29,7 @@ export async function GET() {
             const order = doc.data();
             const deliveryPersonId = order.deliveryPersonId;
             const status = order.status?.toLowerCase() || '';
-            
+
             if (!deliveryPersonId) return;
             if (status !== 'delivered' && status !== 'completed') return;
 
@@ -43,7 +43,7 @@ export async function GET() {
 
             codByPartner[deliveryPersonId].collected += (order.total || 0);
             codByPartner[deliveryPersonId].orders += 1;
-            
+
             // Track pending orders (not yet settled)
             if (!order.codSettled) {
                 codByPartner[deliveryPersonId].pendingOrderIds.push(doc.id);
@@ -61,15 +61,17 @@ export async function GET() {
             method: string;
             status: string;
             createdAt: string;
+            processedAt: string | null;
             notes: string | null;
+            receiptId: string | null;
         }> = [];
 
         settlementsSnapshot.docs.forEach(doc => {
             const settlement = doc.data();
             const deliveryPersonId = settlement.deliveryPersonId;
-            
+
             if (settlement.status === 'completed') {
-                settledByPartner[deliveryPersonId] = 
+                settledByPartner[deliveryPersonId] =
                     (settledByPartner[deliveryPersonId] || 0) + (settlement.amount || 0);
             }
 
@@ -180,7 +182,7 @@ export async function POST(request: Request) {
         const deliveryPersonRef = db.collection(collections.deliveryPersons).doc(deliveryPersonId);
         const deliveryPersonDoc = await deliveryPersonRef.get();
         const currentData = deliveryPersonDoc.data() || {};
-        
+
         // Reduce codCollected and increase codSettled
         const currentCodCollected = currentData.codCollected || 0;
         const currentCodSettled = currentData.codSettled || 0;
