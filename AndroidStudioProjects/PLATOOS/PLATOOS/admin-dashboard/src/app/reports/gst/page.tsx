@@ -19,8 +19,14 @@ interface GSTEntry {
     vendorName: string;
     orderDate: string;
     itemTotal: number;
+    discount: number;
+    itemTotalAfterDiscount: number;
+    deliveryFee: number;
     commission: number;
     gstOnCommission: number;
+    gstOnFood: number;
+    gstOnDelivery: number;
+    totalGst: number;
     totalPlatformEarning: number;
     paymentMode: string;
 }
@@ -30,7 +36,11 @@ interface MonthlyGST {
     monthKey: string;
     ordersCount: number;
     totalItemSales: number;
+    totalDeliveryFees: number;
     totalCommission: number;
+    totalGstOnCommission: number;
+    totalGstOnFood: number;
+    totalGstOnDelivery: number;
     totalGst: number;
     totalPlatformEarning: number;
 }
@@ -52,12 +62,18 @@ interface GSTReportData {
     summary: {
         totalOrders: number;
         totalItemSales: number;
+        totalDeliveryFees: number;
         totalCommission: number;
+        totalGstOnCommission: number;
+        totalGstOnFood: number;
+        totalGstOnDelivery: number;
         totalGstCollected: number;
         totalPlatformEarning: number;
         commissionRate: number;
+        gstOnCommissionRate: number;
+        gstOnFoodRate: number;
+        gstOnDeliveryRate: number;
         gstRate: number;
-        effectiveGstOnSales: number;
     };
 }
 
@@ -193,7 +209,7 @@ export default function GSTReportPage() {
                         GST Report
                     </h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>
-                        Track GST collected on platform commission (15% commission + 18% GST)
+                        GST: 5% on Food, 18% on Delivery & Commission
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -226,15 +242,40 @@ export default function GSTReportPage() {
                 </div>
             </div>
 
-            {/* Summary Cards */}
+            {/* Summary Cards - Row 1 */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                 <StatCard
                     title="Total GST Collected"
                     value={formatCurrency(data?.summary.totalGstCollected || 0)}
-                    subtitle={`${data?.summary.gstRate || 18}% on commission`}
+                    subtitle="All GST combined"
                     icon={Receipt}
                     color="primary"
                 />
+                <StatCard
+                    title="GST on Food (5%)"
+                    value={formatCurrency(data?.summary.totalGstOnFood || 0)}
+                    subtitle="On item total after discount"
+                    icon={IndianRupee}
+                    color="success"
+                />
+                <StatCard
+                    title="GST on Delivery (18%)"
+                    value={formatCurrency(data?.summary.totalGstOnDelivery || 0)}
+                    subtitle="On delivery fee"
+                    icon={IndianRupee}
+                    color="warning"
+                />
+                <StatCard
+                    title="GST on Commission (18%)"
+                    value={formatCurrency(data?.summary.totalGstOnCommission || 0)}
+                    subtitle="On 15% commission"
+                    icon={Percent}
+                    color="error"
+                />
+            </div>
+
+            {/* Summary Cards - Row 2 */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                 <StatCard
                     title="Total Commission"
                     value={formatCurrency(data?.summary.totalCommission || 0)}
@@ -245,7 +286,7 @@ export default function GSTReportPage() {
                 <StatCard
                     title="Platform Earnings"
                     value={formatCurrency(data?.summary.totalPlatformEarning || 0)}
-                    subtitle="Commission + GST"
+                    subtitle="Commission + GST on Commission"
                     icon={TrendingUp}
                     color="warning"
                 />
@@ -253,6 +294,13 @@ export default function GSTReportPage() {
                     title="Total Item Sales"
                     value={formatCurrency(data?.summary.totalItemSales || 0)}
                     subtitle={`${data?.summary.totalOrders || 0} orders`}
+                    icon={IndianRupee}
+                    color="primary"
+                />
+                <StatCard
+                    title="Total Delivery Fees"
+                    value={formatCurrency(data?.summary.totalDeliveryFees || 0)}
+                    subtitle="Collected from customers"
                     icon={IndianRupee}
                     color="primary"
                 />

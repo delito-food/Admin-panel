@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 
 // GST Rate constants
-const GST_RATE = 0.18; // 18% GST
+const GST_ON_COMMISSION = 0.18; // 18% GST on commission
+const GST_ON_DELIVERY = 0.18; // 18% GST on delivery fee
+const GST_ON_FOOD = 0.05; // 5% GST on food items
 const COMMISSION_RATE = 0.15; // 15% commission on item total
 
 interface GSTEntry {
@@ -11,8 +13,14 @@ interface GSTEntry {
     vendorName: string;
     orderDate: string;
     itemTotal: number;
+    discount: number;
+    itemTotalAfterDiscount: number;
+    deliveryFee: number;
     commission: number;
     gstOnCommission: number;
+    gstOnFood: number;
+    gstOnDelivery: number;
+    totalGst: number;
     totalPlatformEarning: number;
     paymentMode: string;
 }
@@ -22,7 +30,11 @@ interface MonthlyGST {
     monthKey: string;
     ordersCount: number;
     totalItemSales: number;
+    totalDeliveryFees: number;
     totalCommission: number;
+    totalGstOnCommission: number;
+    totalGstOnFood: number;
+    totalGstOnDelivery: number;
     totalGst: number;
     totalPlatformEarning: number;
 }
@@ -94,8 +106,24 @@ export async function GET(request: Request) {
 
             // Calculate GST
             const itemTotal = order.itemTotal || order.subtotal || order.total || 0;
+            const discount = order.discount || 0;
+            const itemTotalAfterDiscount = Math.max(0, itemTotal - discount);
+            const deliveryFee = order.deliveryFee || 0;
+
+            // Commission on item total (before discount is applied for commission calc)
             const commission = itemTotal * COMMISSION_RATE;
-            const gstOnCommission = commission * GST_RATE;
+            const gstOnCommission = commission * GST_ON_COMMISSION;
+
+            // GST on food (5% on item total after discount)
+            const gstOnFood = itemTotalAfterDiscount * GST_ON_FOOD;
+
+            // GST on delivery fee (18%)
+            const gstOnDelivery = deliveryFee * GST_ON_DELIVERY;
+
+            // Total GST collected
+            const totalGst = gstOnCommission + gstOnFood + gstOnDelivery;
+
+            // Platform earnings = commission + GST on commission
             const totalPlatformEarning = commission + gstOnCommission;
 
             // Add to entries
@@ -106,8 +134,14 @@ export async function GET(request: Request) {
                 vendorName: orderVendorName,
                 orderDate: dateStr,
                 itemTotal: itemTotal,
+                discount: discount,
+                itemTotalAfterDiscount: itemTotalAfterDiscount,
+                deliveryFee: deliveryFee,
                 commission: commission,
                 gstOnCommission: gstOnCommission,
+                gstOnFood: gstOnFood,
+                gstOnDelivery: gstOnDelivery,
+                totalGst: totalGst,
                 totalPlatformEarning: totalPlatformEarning,
                 paymentMode: order.paymentMode || 'Unknown',
             });
@@ -122,15 +156,23 @@ export async function GET(request: Request) {
                     monthKey: monthKey,
                     ordersCount: 0,
                     totalItemSales: 0,
+                    totalDeliveryFees: 0,
                     totalCommission: 0,
+                    totalGstOnCommission: 0,
+                    totalGstOnFood: 0,
+                    totalGstOnDelivery: 0,
                     totalGst: 0,
                     totalPlatformEarning: 0,
                 };
             }
             monthlyGST[monthKey].ordersCount++;
-            monthlyGST[monthKey].totalItemSales += itemTotal;
+            monthlyGST[monthKey].totalItemSales += itemTotalAfterDiscount;
+            monthlyGST[monthKey].totalDeliveryFees += deliveryFee;
             monthlyGST[monthKey].totalCommission += commission;
-            monthlyGST[monthKey].totalGst += gstOnCommission;
+            monthlyGST[monthKey].totalGstOnCommission += gstOnCommission;
+            monthlyGST[monthKey].totalGstOnFood += gstOnFood;
+            monthlyGST[monthKey].totalGstOnDelivery += gstOnDelivery;
+            monthlyGST[monthKey].totalGst += totalGst;
             monthlyGST[monthKey].totalPlatformEarning += totalPlatformEarning;
 
             // Vendor aggregation
@@ -146,9 +188,9 @@ export async function GET(request: Request) {
                 };
             }
             vendorGST[orderVendorId].ordersCount++;
-            vendorGST[orderVendorId].totalItemSales += itemTotal;
+            vendorGST[orderVendorId].totalItemSales += itemTotalAfterDiscount;
             vendorGST[orderVendorId].totalCommission += commission;
-            vendorGST[orderVendorId].totalGst += gstOnCommission;
+            vendorGST[orderVendorId].totalGst += totalGst;
             vendorGST[orderVendorId].totalPlatformEarning += totalPlatformEarning;
         });
 
@@ -164,14 +206,19 @@ export async function GET(request: Request) {
         // Calculate summary
         const summary = {
             totalOrders: gstEntries.length,
-            totalItemSales: gstEntries.reduce((sum, e) => sum + e.itemTotal, 0),
+            totalItemSales: gstEntries.reduce((sum, e) => sum + e.itemTotalAfterDiscount, 0),
+            totalDeliveryFees: gstEntries.reduce((sum, e) => sum + e.deliveryFee, 0),
             totalCommission: gstEntries.reduce((sum, e) => sum + e.commission, 0),
-            totalGstCollected: gstEntries.reduce((sum, e) => sum + e.gstOnCommission, 0),
+            totalGstOnCommission: gstEntries.reduce((sum, e) => sum + e.gstOnCommission, 0),
+            totalGstOnFood: gstEntries.reduce((sum, e) => sum + e.gstOnFood, 0),
+            totalGstOnDelivery: gstEntries.reduce((sum, e) => sum + e.gstOnDelivery, 0),
+            totalGstCollected: gstEntries.reduce((sum, e) => sum + e.totalGst, 0),
             totalPlatformEarning: gstEntries.reduce((sum, e) => sum + e.totalPlatformEarning, 0),
             commissionRate: COMMISSION_RATE * 100,
-            gstRate: GST_RATE * 100,
-            effectiveGstOnSales: gstEntries.length > 0 ?
-                (gstEntries.reduce((sum, e) => sum + e.gstOnCommission, 0) / gstEntries.reduce((sum, e) => sum + e.itemTotal, 0)) * 100 : 0,
+            gstOnCommissionRate: GST_ON_COMMISSION * 100,
+            gstOnFoodRate: GST_ON_FOOD * 100,
+            gstOnDeliveryRate: GST_ON_DELIVERY * 100,
+            gstRate: GST_ON_COMMISSION * 100, // For backward compatibility
         };
 
         return NextResponse.json({
