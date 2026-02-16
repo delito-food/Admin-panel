@@ -120,7 +120,7 @@ export default function CODTrackingPage() {
                     </div>
                     <div style={{ overflowX: 'auto' }}>
                         <table className="table-premium"><thead><tr>
-                            <th>Delivery Partner</th><th style={{ textAlign: 'right' }}>COD Collected</th><th style={{ textAlign: 'right' }}>Settled</th><th style={{ textAlign: 'right' }}>Pending</th><th style={{ textAlign: 'center' }}>COD Orders</th><th style={{ textAlign: 'center' }}>Actions</th>
+                            <th>Delivery Partner</th><th style={{ textAlign: 'right' }}>COD Collected</th><th style={{ textAlign: 'right' }}>Settled</th><th style={{ textAlign: 'right' }}>Pending</th><th style={{ textAlign: 'center' }}>Pending Orders</th><th style={{ textAlign: 'center' }}>Actions</th>
                         </tr></thead><tbody>
                                 {fp.length === 0 ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>No partners found</td></tr>
                                     : fp.map(p => (
@@ -137,7 +137,11 @@ export default function CODTrackingPage() {
                                                 <span style={{ fontWeight: 600, fontSize: '0.85rem', color: p.codPending > 0 ? '#F59E0B' : 'var(--foreground-secondary)' }}>{fmt(p.codPending)}</span>
                                                 {p.codPending > 5000 && <AlertTriangle size={13} style={{ marginLeft: 6, color: '#EF4444', verticalAlign: 'middle' }} />}
                                             </td>
-                                            <td style={{ textAlign: 'center', fontSize: '0.85rem' }}>{p.totalCodOrders}</td>
+                                            <td style={{ textAlign: 'center', fontSize: '0.85rem' }}>
+                                                <span style={{ padding: '2px 8px', borderRadius: 100, background: p.pendingOrders > 0 ? 'rgba(245,158,11,0.15)' : 'var(--surface)', color: p.pendingOrders > 0 ? '#F59E0B' : 'var(--foreground-secondary)', fontWeight: 600 }}>
+                                                    {p.pendingOrders}
+                                                </span>
+                                            </td>
                                             <td style={{ textAlign: 'center' }}>{p.codPending > 0 && (
                                                 <button onClick={() => openSettle(p)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 8, background: '#10B981', color: 'white', border: 'none', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}>
                                                     <Banknote size={13} /> Settle

@@ -121,8 +121,8 @@ export async function GET() {
                 cuisineTypes: data.cuisineTypes || [],
                 minimumOrderAmount: data.minimumOrderAmount || 0,
                 averageDeliveryTime: data.averageDeliveryTime || 30,
-                registeredAt: data.createdAt || new Date().toISOString(),
-                createdAt: data.createdAt || new Date().toISOString(),
+                registeredAt: (data.createdAt?.toDate?.() || data.createdAt || new Date()).toISOString(),
+                createdAt: (data.createdAt?.toDate?.() || data.createdAt || new Date()).toISOString(),
                 status: data.isVerified ? 'active' : 'pending',
             };
         });
