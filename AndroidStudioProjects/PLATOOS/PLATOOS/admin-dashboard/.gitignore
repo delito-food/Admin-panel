@@ -1,0 +1,65 @@
+# ========================================
+# PLATOOS Admin Dashboard - .gitignore
+# ========================================
+
+# ---- Dependencies ----
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ---- Next.js Build ----
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# ---- Environment Variables (CRITICAL - contains secrets) ----
+.env
+.env.*
+!.env.example
+
+# ---- Firebase Service Account Keys ----
+*-firebase-adminsdk-*.json
+firebase-service-account*.json
+serviceAccount*.json
+*.pem
+
+# ---- Build Logs ----
+build_log*.txt
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- TypeScript ----
+*.tsbuildinfo
+
+# ---- Testing ----
+/coverage
+
+# ---- IDE / Editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ---- OS Files ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ---- Vercel ----
+.vercel
+
+# ---- Misc ----
+*.local
