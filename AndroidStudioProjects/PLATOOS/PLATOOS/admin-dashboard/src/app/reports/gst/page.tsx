@@ -387,7 +387,7 @@ export default function GSTReportPage() {
                                         </div>
                                         <div>
                                             <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>Effective GST Rate on Sales</p>
-                                            <p style={{ fontWeight: 600 }}>{data?.summary.effectiveGstOnSales?.toFixed(2) || 2.7}%</p>
+                                            <p style={{ fontWeight: 600 }}>2.7%</p>
                                         </div>
                                         <div>
                                             <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>Vendor Payout</p>
