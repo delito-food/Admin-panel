@@ -319,6 +319,10 @@ export default function ReportsPage() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+                    <Link href="/reports/gst" className="btn btn-outline" style={{ color: '#10B981', borderColor: '#10B981' }}>
+                        <IndianRupee size={16} />
+                        GST Report
+                    </Link>
                     <Link href="/reports/advanced" className="btn btn-outline" style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }}>
                         <BarChart3 size={16} />
                         Advanced Analytics

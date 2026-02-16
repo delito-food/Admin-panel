@@ -21,11 +21,22 @@ interface DeliveryPartnerPayout {
     deliveryFees: number;
     deliveryCount: number;
     incentives: number;
+    tips: number;
     totalEarnings: number;
     paidAmount: number;
     pendingAmount: number;
+    codCollected: number;
+    codSettled: number;
+    codPending: number;
     bankDetails?: { accountNumber?: string; ifsc?: string; bankName?: string } | null;
     upiId?: string | null;
+    recentDeliveries?: Array<{
+        orderId: string;
+        distanceKm: number;
+        earnings: number;
+        tip: number;
+        date: string;
+    }>;
 }
 
 interface PayoutRecord {
@@ -45,9 +56,16 @@ interface DeliveryPayoutData {
     recentPayouts: PayoutRecord[];
     summary: {
         totalEarnings: number;
-        totalPaid: number;
-        totalPending: number;
+        totalPaidAmount: number;
+        totalPendingPayouts: number;
+        totalTips: number;
+        totalDeliveryFees: number;
+        totalDeliveries: number;
+        totalCodCollected: number;
+        totalCodSettled: number;
+        totalCodPending: number;
         partnersWithPending: number;
+        activePartners: number;
     };
 }
 
@@ -150,7 +168,30 @@ export default function DeliveryPayoutsPage() {
             d.phoneNumber.includes(searchTerm)
         ) || [];
 
+    const [syncing, setSyncing] = useState(false);
+
     const partnersWithPending = allPartners.filter(p => p.pendingAmount > 0);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            const res = await fetch('/api/delivery/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const result = await res.json();
+            if (result.success) {
+                await refetch();
+                alert(result.message || 'Earnings synced successfully!');
+            } else {
+                alert(result.error || 'Sync failed');
+            }
+        } catch {
+            alert('Failed to sync earnings');
+        }
+        setSyncing(false);
+    };
 
     if (loading) {
         return (
@@ -181,21 +222,38 @@ export default function DeliveryPayoutsPage() {
                     <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Delivery Payouts</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>Process and track payments to delivery partners</p>
                 </div>
-                <button
-                    onClick={handleRefresh}
-                    disabled={refreshing}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        padding: '8px 16px', borderRadius: 10,
-                        background: 'var(--primary)', color: 'white',
-                        border: 'none', cursor: refreshing ? 'not-allowed' : 'pointer',
-                        opacity: refreshing ? 0.6 : 1, fontWeight: 500, fontSize: '0.875rem',
-                        transition: 'all 0.2s'
-                    }}
-                >
-                    <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-                    {refreshing ? 'Refreshing...' : 'Refresh'}
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                        onClick={handleSync}
+                        disabled={syncing}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '8px 16px', borderRadius: 10,
+                            background: 'var(--surface)', color: 'var(--foreground)',
+                            border: '1px solid var(--border)', cursor: syncing ? 'not-allowed' : 'pointer',
+                            opacity: syncing ? 0.6 : 1, fontWeight: 500, fontSize: '0.875rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+                        {syncing ? 'Syncing...' : 'Sync Earnings'}
+                    </button>
+                    <button
+                        onClick={handleRefresh}
+                        disabled={refreshing}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '8px 16px', borderRadius: 10,
+                            background: 'var(--primary)', color: 'white',
+                            border: 'none', cursor: refreshing ? 'not-allowed' : 'pointer',
+                            opacity: refreshing ? 0.6 : 1, fontWeight: 500, fontSize: '0.875rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                </div>
             </div>
 
             {/* Stats */}
@@ -205,9 +263,11 @@ export default function DeliveryPayoutsPage() {
                 </h2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                     <StatCard title="Total Earnings" value={formatCurrency(data?.summary.totalEarnings || 0)} icon={IndianRupee} color="primary" />
-                    <StatCard title="Total Paid" value={formatCurrency(data?.summary.totalPaid || 0)} icon={CheckCircle2} color="success" />
-                    <StatCard title="Pending Payouts" value={formatCurrency(data?.summary.totalPending || 0)} icon={Clock} color="warning" />
-                    <StatCard title="Partners Pending" value={data?.summary.partnersWithPending || 0} icon={Bike} color="error" />
+                    <StatCard title="Total Paid" value={formatCurrency(data?.summary.totalPaidAmount || 0)} icon={CheckCircle2} color="success" />
+                    <StatCard title="Pending Payouts" value={formatCurrency(data?.summary.totalPendingPayouts || 0)} icon={Clock} color="warning" />
+                    <StatCard title="Active Partners" value={data?.summary.activePartners || 0} icon={Bike} color="primary" />
+                    <StatCard title="Total Deliveries" value={data?.summary.totalDeliveries || 0} icon={Package} color="primary" />
+                    <StatCard title="Total Tips" value={formatCurrency(data?.summary.totalTips || 0)} icon={Gift} color="success" />
                 </div>
             </div>
 
@@ -264,7 +324,8 @@ export default function DeliveryPayoutsPage() {
                                         <th>Delivery Partner</th>
                                         <th style={{ textAlign: 'right' }}>Deliveries</th>
                                         <th style={{ textAlign: 'right' }}>Fees</th>
-                                        <th style={{ textAlign: 'right' }}>Incentives</th>
+                                        <th style={{ textAlign: 'right' }}>Tips</th>
+                                        <th style={{ textAlign: 'right' }}>Total Earnings</th>
                                         <th style={{ textAlign: 'right' }}>Paid</th>
                                         <th style={{ textAlign: 'right' }}>Pending</th>
                                         <th style={{ textAlign: 'center' }}>Actions</th>
@@ -293,13 +354,21 @@ export default function DeliveryPayoutsPage() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td style={{ textAlign: 'right' }}>{partner.deliveryCount || partner.totalDeliveries || 0}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 500 }}>{partner.deliveryCount || partner.totalDeliveries || 0}</td>
                                             <td style={{ textAlign: 'right' }}>{formatCurrency(partner.deliveryFees || 0)}</td>
                                             <td style={{ textAlign: 'right' }}>
-                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#8B5CF6' }}>
-                                                    <Gift size={13} /> {formatCurrency(partner.incentives || 0)}
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#10B981' }}>
+                                                    <Gift size={13} /> {formatCurrency(partner.tips || 0)}
                                                 </span>
                                             </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600, color: '#288990' }}>{formatCurrency(partner.totalEarnings || 0)}</td>
+                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(partner.paidAmount || 0)}</td>
+                                            <td style={{ textAlign: 'right' }}>
+                                                <span style={{ fontWeight: 600, color: partner.pendingAmount > 0 ? '#F59E0B' : 'var(--foreground-secondary)' }}>
+                                                    {formatCurrency(partner.pendingAmount || 0)}
+                                                </span>
+                                            </td>
+
                                             <td style={{ textAlign: 'right', color: '#10B981', fontWeight: 500 }}>{formatCurrency(partner.paidAmount || 0)}</td>
                                             <td style={{ textAlign: 'right' }}>
                                                 <span style={{ fontWeight: 600, color: partner.pendingAmount > 0 ? '#F59E0B' : 'var(--foreground-secondary)' }}>
