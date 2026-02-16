@@ -50,6 +50,7 @@ interface VendorGST {
     vendorName: string;
     ordersCount: number;
     totalItemSales: number;
+    totalDeliveryFees: number;
     totalCommission: number;
     totalGst: number;
     totalPlatformEarning: number;
@@ -429,6 +430,7 @@ export default function GSTReportPage() {
                                         <th>Month</th>
                                         <th style={{ textAlign: 'right' }}>Orders</th>
                                         <th style={{ textAlign: 'right' }}>Item Sales</th>
+                                        <th style={{ textAlign: 'right' }}>Delivery Fees</th>
                                         <th style={{ textAlign: 'right' }}>Commission (15%)</th>
                                         <th style={{ textAlign: 'right' }}>GST (18%)</th>
                                         <th style={{ textAlign: 'right' }}>Platform Earning</th>
@@ -440,6 +442,7 @@ export default function GSTReportPage() {
                                             <td style={{ fontWeight: 500 }}>{m.month}</td>
                                             <td style={{ textAlign: 'right' }}>{m.ordersCount}</td>
                                             <td style={{ textAlign: 'right' }}>{formatCurrency(m.totalItemSales)}</td>
+                                            <td style={{ textAlign: 'right' }}>{formatCurrency(m.totalDeliveryFees)}</td>
                                             <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(m.totalCommission)}</td>
                                             <td style={{ textAlign: 'right', color: '#288990', fontWeight: 600 }}>{formatCurrency(m.totalGst)}</td>
                                             <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(m.totalPlatformEarning)}</td>
@@ -466,6 +469,7 @@ export default function GSTReportPage() {
                                         <th>Vendor</th>
                                         <th style={{ textAlign: 'right' }}>Orders</th>
                                         <th style={{ textAlign: 'right' }}>Item Sales</th>
+                                        <th style={{ textAlign: 'right' }}>Delivery Fees</th>
                                         <th style={{ textAlign: 'right' }}>Commission</th>
                                         <th style={{ textAlign: 'right' }}>GST Collected</th>
                                         <th style={{ textAlign: 'right' }}>Platform Earning</th>
@@ -484,6 +488,7 @@ export default function GSTReportPage() {
                                             </td>
                                             <td style={{ textAlign: 'right' }}>{v.ordersCount}</td>
                                             <td style={{ textAlign: 'right' }}>{formatCurrency(v.totalItemSales)}</td>
+                                            <td style={{ textAlign: 'right' }}>{formatCurrency(v.totalDeliveryFees)}</td>
                                             <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(v.totalCommission)}</td>
                                             <td style={{ textAlign: 'right', color: '#288990', fontWeight: 600 }}>{formatCurrency(v.totalGst)}</td>
                                             <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(v.totalPlatformEarning)}</td>
@@ -511,6 +516,7 @@ export default function GSTReportPage() {
                                         <th>Vendor</th>
                                         <th>Date</th>
                                         <th style={{ textAlign: 'right' }}>Item Total</th>
+                                        <th style={{ textAlign: 'right' }}>Delivery Fee</th>
                                         <th style={{ textAlign: 'right' }}>Commission</th>
                                         <th style={{ textAlign: 'right' }}>GST</th>
                                         <th>Payment</th>
@@ -523,8 +529,9 @@ export default function GSTReportPage() {
                                             <td style={{ fontWeight: 500 }}>{e.vendorName}</td>
                                             <td style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>{formatDate(e.orderDate)}</td>
                                             <td style={{ textAlign: 'right' }}>{formatCurrency(e.itemTotal)}</td>
+                                            <td style={{ textAlign: 'right' }}>{formatCurrency(e.deliveryFee)}</td>
                                             <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(e.commission)}</td>
-                                            <td style={{ textAlign: 'right', color: '#288990', fontWeight: 600 }}>{formatCurrency(e.gstOnCommission)}</td>
+                                            <td style={{ textAlign: 'right', color: '#288990', fontWeight: 600 }}>{formatCurrency(e.totalGst)}</td>
                                             <td>
                                                 <span style={{
                                                     padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 500,

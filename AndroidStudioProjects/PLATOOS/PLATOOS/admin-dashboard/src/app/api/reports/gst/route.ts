@@ -68,6 +68,7 @@ export async function GET(request: Request) {
             vendorName: string;
             ordersCount: number;
             totalItemSales: number;
+            totalDeliveryFees: number;
             totalCommission: number;
             totalGst: number;
             totalPlatformEarning: number;
@@ -182,6 +183,7 @@ export async function GET(request: Request) {
                     vendorName: orderVendorName,
                     ordersCount: 0,
                     totalItemSales: 0,
+                    totalDeliveryFees: 0,
                     totalCommission: 0,
                     totalGst: 0,
                     totalPlatformEarning: 0,
@@ -189,6 +191,7 @@ export async function GET(request: Request) {
             }
             vendorGST[orderVendorId].ordersCount++;
             vendorGST[orderVendorId].totalItemSales += itemTotalAfterDiscount;
+            vendorGST[orderVendorId].totalDeliveryFees += deliveryFee;
             vendorGST[orderVendorId].totalCommission += commission;
             vendorGST[orderVendorId].totalGst += totalGst;
             vendorGST[orderVendorId].totalPlatformEarning += totalPlatformEarning;
