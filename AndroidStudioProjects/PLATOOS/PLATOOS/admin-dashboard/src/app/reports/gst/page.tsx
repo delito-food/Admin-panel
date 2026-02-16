@@ -162,14 +162,35 @@ export default function GSTReportPage() {
     const downloadCSV = () => {
         if (!data?.entries) return;
 
-        const headers = ['Order ID', 'Vendor', 'Date', 'Item Total', 'Commission (15%)', 'GST (18% on Commission)', 'Total Platform Earning', 'Payment Mode'];
+        const headers = [
+            'Order ID',
+            'Vendor',
+            'Date',
+            'Item Total',
+            'Discount',
+            'Taxable Value',
+            'Delivery Fee',
+            'Commission (15%)',
+            'GST on Food (5%)',
+            'GST on Delivery (18%)',
+            'GST on Commission (18%)',
+            'Total GST',
+            'Platform Earning',
+            'Payment Mode'
+        ];
         const rows = data.entries.map(e => [
             e.orderId,
             e.vendorName,
             formatDate(e.orderDate),
             e.itemTotal.toFixed(2),
+            (e.discount || 0).toFixed(2),
+            e.itemTotalAfterDiscount.toFixed(2),
+            (e.deliveryFee || 0).toFixed(2),
             e.commission.toFixed(2),
+            (e.gstOnFood || 0).toFixed(2),
+            (e.gstOnDelivery || 0).toFixed(2),
             e.gstOnCommission.toFixed(2),
+            e.totalGst.toFixed(2),
             e.totalPlatformEarning.toFixed(2),
             e.paymentMode,
         ]);
