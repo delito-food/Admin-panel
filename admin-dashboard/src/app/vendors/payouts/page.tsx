@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Store, RefreshCw, Search, CreditCard, CheckCircle2,
     Clock, X, IndianRupee, Loader2, Wallet, TrendingUp,
-    Package, Gift, Shield, AlertTriangle, Send, CheckCircle
+    Package, Gift, Shield, AlertTriangle, Send, CheckCircle,
+    Download, FileText
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { downloadPayoutSlip } from '@/lib/payout-slip';
 
 interface VendorPayout {
     vendorId: string;
@@ -110,6 +112,52 @@ export default function VendorPayoutsPage() {
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    };
+
+    const handleExportCSV = () => {
+        if (!data?.recentPayouts?.length) { alert('No payout data to export'); return; }
+        const headers = ['Vendor', 'Amount', 'Method', 'Transaction ID', 'Status', 'Date', 'Notes'];
+        const rows = data.recentPayouts.map(p => [
+            `"${p.vendorName}"`,
+            p.amount.toFixed(2),
+            p.method,
+            p.transactionId || '',
+            p.status,
+            p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
+            `"${(p.notes || '').replace(/"/g, '""')}"`,
+        ]);
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `vendor-payouts-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadSlip = (payout: RecentPayout) => {
+        const vendor = data?.vendors.find(v => v.vendorId === payout.vendorId);
+        downloadPayoutSlip({
+            recipientType: 'vendor',
+            recipientName: payout.vendorName,
+            recipientPhone: vendor?.phoneNumber,
+            recipientCity: vendor?.city,
+            recipientEmail: vendor?.email,
+            bankDetails: vendor?.bankDetails,
+            upiId: vendor?.upiId,
+            payoutId: payout.payoutId,
+            amount: payout.amount,
+            method: payout.method,
+            transactionId: payout.transactionId,
+            status: payout.status,
+            notes: payout.notes,
+            createdAt: payout.createdAt,
+            confirmedAt: payout.processedAt,
+            totalEarnings: vendor?.totalRevenue,
+            totalPaid: vendor?.paidAmount,
+            pendingAfter: vendor ? Math.max(0, vendor.pendingAmount) : undefined,
+        });
     };
 
     // Step 1: Issue payout — creates record with "issued" status
@@ -248,7 +296,21 @@ export default function VendorPayoutsPage() {
                     <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Vendor Payouts</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>Process and track vendor payments</p>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                        onClick={handleExportCSV}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '8px 16px', borderRadius: 10,
+                            background: 'rgba(16,185,129,0.1)', color: '#10B981',
+                            border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
+                            fontWeight: 500, fontSize: '0.875rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <Download size={16} />
+                        Export Report
+                    </button>
                     <button
                         onClick={handleReconcile}
                         disabled={reconciling}
@@ -536,19 +598,34 @@ export default function VendorPayoutsPage() {
                                             {payout.createdAt ? new Date(payout.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
-                                            {payout.status === 'issued' && (
-                                                <button
-                                                    onClick={() => handleConfirmPayout(payout.payoutId, payout.vendorName)}
-                                                    disabled={processing}
-                                                    style={{
-                                                        padding: '4px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
-                                                        background: 'rgba(16,185,129,0.15)', color: '#10B981',
-                                                        border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    ✓ Mark Completed
-                                                </button>
-                                            )}
+                                            <div style={{ display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
+                                                {payout.status === 'issued' && (
+                                                    <button
+                                                        onClick={() => handleConfirmPayout(payout.payoutId, payout.vendorName)}
+                                                        disabled={processing}
+                                                        style={{
+                                                            padding: '4px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                                            background: 'rgba(16,185,129,0.15)', color: '#10B981',
+                                                            border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
+                                                        }}
+                                                    >
+                                                        ✓ Mark Completed
+                                                    </button>
+                                                )}
+                                                {payout.status === 'completed' && (
+                                                    <button
+                                                        onClick={() => handleDownloadSlip(payout)}
+                                                        style={{
+                                                            padding: '4px 10px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                                            background: 'rgba(99,102,241,0.1)', color: '#6366F1',
+                                                            border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+                                                            display: 'inline-flex', alignItems: 'center', gap: 3,
+                                                        }}
+                                                    >
+                                                        <FileText size={11} /> Slip
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

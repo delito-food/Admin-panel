@@ -43,6 +43,7 @@ interface MonthlyGST {
     totalGstOnDelivery: number;
     totalGst: number;
     totalPlatformEarning: number;
+    totalPlatformEarningExclGst: number;
 }
 
 interface VendorGST {
@@ -54,6 +55,7 @@ interface VendorGST {
     totalCommission: number;
     totalGst: number;
     totalPlatformEarning: number;
+    totalPlatformEarningExclGst: number;
 }
 
 interface GSTReportData {
@@ -70,6 +72,7 @@ interface GSTReportData {
         totalGstOnDelivery: number;
         totalGstCollected: number;
         totalPlatformEarning: number;
+        totalPlatformEarningExclGst: number;
         commissionRate: number;
         gstOnCommissionRate: number;
         gstOnFoodRate: number;
@@ -421,7 +424,14 @@ export default function GSTReportPage() {
                     color="success"
                 />
                 <StatCard
-                    title="Platform Earnings"
+                    title="Platform Earning (excl. GST)"
+                    value={formatCurrency(data?.summary.totalPlatformEarningExclGst || data?.summary.totalCommission || 0)}
+                    subtitle="Commission only — actual revenue"
+                    icon={TrendingUp}
+                    color="success"
+                />
+                <StatCard
+                    title="Platform Earning (incl. GST)"
                     value={formatCurrency(data?.summary.totalPlatformEarning || 0)}
                     subtitle="Commission + GST on Commission"
                     icon={TrendingUp}

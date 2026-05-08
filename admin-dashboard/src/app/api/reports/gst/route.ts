@@ -37,6 +37,7 @@ interface MonthlyGST {
     totalGstOnDelivery: number;
     totalGst: number;
     totalPlatformEarning: number;
+    totalPlatformEarningExclGst: number;
 }
 
 export async function GET(request: Request) {
@@ -68,6 +69,7 @@ export async function GET(request: Request) {
             totalCommission: number;
             totalGst: number;
             totalPlatformEarning: number;
+            totalPlatformEarningExclGst: number;
         }> = {};
 
         orderDocs.forEach(order => {
@@ -164,6 +166,7 @@ export async function GET(request: Request) {
                     totalGstOnDelivery: 0,
                     totalGst: 0,
                     totalPlatformEarning: 0,
+                    totalPlatformEarningExclGst: 0,
                 };
             }
             monthlyGST[monthKey].ordersCount++;
@@ -175,6 +178,7 @@ export async function GET(request: Request) {
             monthlyGST[monthKey].totalGstOnDelivery += gstOnDelivery;
             monthlyGST[monthKey].totalGst += totalGst;
             monthlyGST[monthKey].totalPlatformEarning += totalPlatformEarning;
+            monthlyGST[monthKey].totalPlatformEarningExclGst += commission;
 
             // Vendor aggregation
             if (!vendorGST[orderVendorId]) {
@@ -187,6 +191,7 @@ export async function GET(request: Request) {
                     totalCommission: 0,
                     totalGst: 0,
                     totalPlatformEarning: 0,
+                    totalPlatformEarningExclGst: 0,
                 };
             }
             vendorGST[orderVendorId].ordersCount++;
@@ -195,6 +200,7 @@ export async function GET(request: Request) {
             vendorGST[orderVendorId].totalCommission += commission;
             vendorGST[orderVendorId].totalGst += totalGst;
             vendorGST[orderVendorId].totalPlatformEarning += totalPlatformEarning;
+            vendorGST[orderVendorId].totalPlatformEarningExclGst += commission;
         });
 
         // Sort entries by date (newest first)
@@ -217,6 +223,7 @@ export async function GET(request: Request) {
             totalGstOnDelivery: gstEntries.reduce((sum, e) => sum + e.gstOnDelivery, 0),
             totalGstCollected: gstEntries.reduce((sum, e) => sum + e.totalGst, 0),
             totalPlatformEarning: gstEntries.reduce((sum, e) => sum + e.totalPlatformEarning, 0),
+            totalPlatformEarningExclGst: gstEntries.reduce((sum, e) => sum + e.commission, 0),
             commissionRate: COMMISSION_RATE * 100,
             gstOnCommissionRate: GST_ON_COMMISSION * 100,
             gstOnFoodRate: GST_ON_FOOD * 100,

@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Bike, RefreshCw, Search, CheckCircle2, Clock,
     X, CreditCard, TrendingUp, Gift, IndianRupee,
-    Loader2, Wallet, Package, Send, CheckCircle
+    Loader2, Wallet, Package, Send, CheckCircle,
+    Download, FileText
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { downloadPayoutSlip } from '@/lib/payout-slip';
 
 interface DeliveryPartnerPayout {
     deliveryPersonId: string;
@@ -118,6 +120,50 @@ export default function DeliveryPayoutsPage() {
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    };
+
+    const handleExportCSV = () => {
+        if (!data?.recentPayouts?.length) { alert('No payout data to export'); return; }
+        const headers = ['Delivery Partner', 'Amount', 'Method', 'Transaction ID', 'Status', 'Date', 'Notes'];
+        const rows = data.recentPayouts.map(p => [
+            `"${p.deliveryPersonName}"`,
+            p.amount.toFixed(2),
+            p.method,
+            p.transactionId || '',
+            p.status,
+            p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
+            `"${(p.notes || '').replace(/"/g, '""')}"`,
+        ]);
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `delivery-payouts-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadSlip = (payout: PayoutRecord) => {
+        const partner = data?.deliveryPartners.find(d => d.deliveryPersonId === payout.deliveryPersonId);
+        downloadPayoutSlip({
+            recipientType: 'delivery',
+            recipientName: payout.deliveryPersonName,
+            recipientPhone: partner?.phoneNumber,
+            recipientCity: partner?.city,
+            bankDetails: partner?.bankDetails,
+            upiId: partner?.upiId,
+            payoutId: payout.payoutId,
+            amount: payout.amount,
+            method: payout.method,
+            transactionId: payout.transactionId,
+            status: payout.status,
+            notes: payout.notes,
+            createdAt: payout.createdAt,
+            totalEarnings: partner?.totalEarnings,
+            totalPaid: partner?.paidAmount,
+            pendingAfter: partner ? Math.max(0, partner.pendingAmount) : undefined,
+        });
     };
 
     // Step 1: Issue payout — creates record with "issued" status
@@ -281,7 +327,21 @@ export default function DeliveryPayoutsPage() {
                     <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>Delivery Payouts</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>Process and track payments to delivery partners</p>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                        onClick={handleExportCSV}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '8px 16px', borderRadius: 10,
+                            background: 'rgba(16,185,129,0.1)', color: '#10B981',
+                            border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
+                            fontWeight: 500, fontSize: '0.875rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <Download size={16} />
+                        Export Report
+                    </button>
                     <button
                         onClick={handleReconcile}
                         disabled={reconciling}
@@ -547,19 +607,34 @@ export default function DeliveryPayoutsPage() {
                                             {payout.createdAt ? new Date(payout.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
-                                            {payout.status === 'issued' && (
-                                                <button
-                                                    onClick={() => handleConfirmPayout(payout.payoutId, payout.deliveryPersonName)}
-                                                    disabled={processing}
-                                                    style={{
-                                                        padding: '4px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
-                                                        background: 'rgba(16,185,129,0.15)', color: '#10B981',
-                                                        border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    ✓ Mark Completed
-                                                </button>
-                                            )}
+                                            <div style={{ display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
+                                                {payout.status === 'issued' && (
+                                                    <button
+                                                        onClick={() => handleConfirmPayout(payout.payoutId, payout.deliveryPersonName)}
+                                                        disabled={processing}
+                                                        style={{
+                                                            padding: '4px 12px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                                            background: 'rgba(16,185,129,0.15)', color: '#10B981',
+                                                            border: '1px solid rgba(16,185,129,0.3)', cursor: 'pointer',
+                                                        }}
+                                                    >
+                                                        ✓ Mark Completed
+                                                    </button>
+                                                )}
+                                                {payout.status === 'completed' && (
+                                                    <button
+                                                        onClick={() => handleDownloadSlip(payout)}
+                                                        style={{
+                                                            padding: '4px 10px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                                            background: 'rgba(99,102,241,0.1)', color: '#6366F1',
+                                                            border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
+                                                            display: 'inline-flex', alignItems: 'center', gap: 3,
+                                                        }}
+                                                    >
+                                                        <FileText size={11} /> Slip
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
