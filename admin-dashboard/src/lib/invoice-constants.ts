@@ -1,0 +1,144 @@
+/**
+ * Platform-level constants for invoice generation.
+ * Inspired by Swiggy/Zomato invoice fields.
+ */
+
+export const PLATFORM = {
+    name: 'Delito',
+    legalName: 'Delito',
+    tagline: 'Food Delivery Platform',
+    address: 'Hathras, Uttar Pradesh, India',
+    gstin: '', // Add your GSTIN here, e.g. '09AABCD1234E1Z5'
+    fssaiLicense: '', // Add your FSSAI license here
+    pan: '', // Add your PAN here
+    cin: '', // Company CIN
+    email: 'support@delito.in',
+    phone: '',
+    website: 'www.delito.in',
+};
+
+// GST rates for food delivery (Restaurant Service)
+export const GST_RATES = {
+    CGST: 2.5,   // Central GST rate on restaurant food
+    SGST: 2.5,   // State GST rate on restaurant food
+    IGST: 5,     // Inter-state GST (CGST + SGST)
+    GST_ON_DELIVERY: 18, // GST on delivery charges
+    GST_ON_PLATFORM_FEE: 18, // GST on platform/convenience fee
+};
+
+// HSN Codes (like Swiggy/Zomato)
+export const HSN_CODES = {
+    FOOD: '9963',           // Restaurant & catering services
+    DELIVERY: '996812',     // Courier & delivery services
+    PLATFORM: '998599',     // Other support services (platform fee)
+};
+
+// Invoice number prefix
+export const INVOICE_PREFIX = 'DELITO';
+
+/**
+ * Generate invoice number from a sequential counter
+ * Format: DELITO-INV-2026-000001
+ */
+export function generateInvoiceNumber(counter: number): string {
+    const year = new Date().getFullYear();
+    const paddedCounter = String(counter).padStart(6, '0');
+    return `${INVOICE_PREFIX}-INV-${year}-${paddedCounter}`;
+}
+
+/**
+ * Invoice data structure matching Swiggy/Zomato format
+ */
+export interface InvoiceData {
+    // Header
+    invoiceNumber: string;
+    invoiceDate: string;
+    invoiceType: 'Tax Invoice' | 'Bill of Supply';
+    invoiceSubType?: 'food' | 'delivery' | 'platform';
+    onBehalfOf?: string; // e.g. "on behalf of <vendor name>" or "on behalf of <delivery person>"
+
+    // Order Details
+    orderId: string;
+    orderDate: string;
+    orderTime: string;
+    paymentMode: string;
+    paymentStatus: string;
+    transactionId?: string;
+
+    // Customer Details
+    customer: {
+        name: string;
+        phone: string;
+        deliveryAddress: string;
+    };
+
+    // Vendor/Restaurant Details
+    vendor: {
+        name: string;
+        address: string;
+        city: string;
+        gstin: string;
+        fssaiLicense: string;
+        phone: string;
+    };
+
+    // Item-wise breakdown with tax
+    items: InvoiceItem[];
+
+    // Bill Summary
+    billSummary: {
+        itemTotal: number;
+        discount: number;
+        deliveryFee: number;
+        packagingFee: number;       // smallOrderSupportFee / platform fee
+        tip: number;
+        coinDiscount: number;
+        promoDiscount: number;
+        taxableAmount: number;
+        cgst: number;
+        sgst: number;
+        totalTax: number;
+        roundOff: number;
+        grandTotal: number;
+    };
+
+    // Tax Summary (for GST reporting)
+    taxSummary: TaxSummaryRow[];
+
+    // Platform Details
+    platform: typeof PLATFORM;
+
+    // Status
+    orderStatus: string;
+}
+
+export interface InvoiceItem {
+    slNo: number;
+    name: string;
+    hsnCode?: string;
+    quantity: number;
+    unitPrice: number;
+    discount: number;
+    taxableValue: number;
+    cgstRate: number;
+    cgstAmount: number;
+    sgstRate: number;
+    sgstAmount: number;
+    totalAmount: number;
+}
+
+export interface TaxSummaryRow {
+    description: string;
+    hsnCode?: string;
+    taxableAmount: number;
+    cgstRate: number;
+    cgstAmount: number;
+    sgstRate: number;
+    sgstAmount: number;
+    totalTax: number;
+}
+
+
+
+
+
