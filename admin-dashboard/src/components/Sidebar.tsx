@@ -82,6 +82,7 @@ const navigation: NavItem[] = [
         children: [
             { label: 'Performance', href: '/vendors/performance' },
             { label: 'Commission', href: '/vendors/commission' },
+            { label: 'Commission Invoices', href: '/vendors/commission-invoices' },
             { label: 'Payouts', href: '/vendors/payouts' },
             { label: 'Online/Offline', href: '/vendors/status' },
         ],

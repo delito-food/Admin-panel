@@ -36,6 +36,71 @@ export const HSN_CODES = {
 // Invoice number prefix
 export const INVOICE_PREFIX = 'DELITO';
 
+// ─── Commission Invoice Constants ───
+export const COMMISSION_PLATFORM = {
+    name: 'DELITO',
+    tagline: 'Powered by Delito',
+    gstin: '09CAMPV6339R1ZD',
+    fssaiLicense: '22726884000160',
+    address: 'Verma, Colony Gali No. 1,\nHathras, Uttar Pradesh,\nIndia',
+    state: 'Uttar Pradesh',
+    email: 'Delitosupportt@gmail.com',
+    website: 'Delito.vercel.app',
+};
+
+export const COMMISSION_HSN_CODE = '998399';
+export const COMMISSION_GST_RATE = 18; // 18% total (9% CGST + 9% SGST)
+
+/**
+ * Commission Invoice data structure for vendor commission tax invoices.
+ */
+export interface CommissionInvoiceData {
+    platform: typeof COMMISSION_PLATFORM;
+    vendor: {
+        name: string;
+        gstin: string;
+        fssaiLicense: string;
+        address: string;
+        state: string;
+    };
+    invoiceNumber: string;
+    invoiceDate: string;
+    hsnCode: string;
+    placeOfSupply: string;
+    serviceType: string;
+    category: string;
+    reverseCharges: boolean;
+    billingPeriod: string;
+    commissionRate: number;
+    weeklyBreakdown: Array<{
+        weekLabel: string;
+        orders: number;
+        grossSales: number;
+        commission: number;
+        gstOnCommission: number;
+        totalDeduction: number;
+        netPayout: number;
+    }>;
+    monthlyTotals: {
+        orders: number;
+        grossSales: number;
+        commission: number;
+        gstOnCommission: number;
+        totalDeduction: number;
+        netPayout: number;
+    };
+    gstBreakup: {
+        igstRate: number;
+        igstAmount: number;
+        cgstRate: number;
+        cgstAmount: number;
+        sgstRate: number;
+        sgstAmount: number;
+        totalGst: number;
+        totalCommissionPlusGst: number;
+    };
+}
+
 /**
  * Generate invoice number from a sequential counter
  * Format: DELITO-INV-2026-000001
