@@ -2,6 +2,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { InvoiceData } from './invoice-constants';
+import { DELITO_LOGO_BASE64 } from './delito-logo';
 
 /**
  * Generate a professional Swiggy/Zomato style invoice PDF.
@@ -24,29 +25,42 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
 
     // ─── HEADER SECTION ───
     doc.setFillColor(...primaryColor);
-    doc.rect(0, 0, pageWidth, 30, 'F');
+    doc.rect(0, 0, pageWidth, 34, 'F');
 
+    // Logo
+    try {
+        doc.addImage(DELITO_LOGO_BASE64, 'PNG', margin, 3, 16, 16);
+    } catch {
+        // fallback: no logo
+    }
+
+    const logoOffset = 33; // text starts after logo
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text(invoice.platform.name, margin, 13);
+    doc.text(invoice.platform.name, logoOffset, 12);
 
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
-    doc.text(invoice.platform.legalName, margin, 19);
+    doc.text(invoice.platform.legalName, logoOffset, 17);
     if (invoice.platform.gstin) {
-        doc.text(`GSTIN: ${invoice.platform.gstin}`, margin, 24);
+        doc.text(`GSTIN: ${invoice.platform.gstin}`, logoOffset, 22);
+    }
+    if (invoice.platform.fssaiLicense) {
+        doc.text(`FSSAI: ${invoice.platform.fssaiLicense}`, logoOffset, 27);
     }
 
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text(invoice.invoiceType, pageWidth - margin, 13, { align: 'right' });
+    doc.text(invoice.invoiceType, pageWidth - margin, 12, { align: 'right' });
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Invoice #: ${invoice.invoiceNumber}`, pageWidth - margin, 19, { align: 'right' });
+    doc.text(`Invoice #: ${invoice.invoiceNumber}`, pageWidth - margin, 18, { align: 'right' });
     doc.text(`Date: ${invoice.invoiceDate}`, pageWidth - margin, 24, { align: 'right' });
+    doc.setFontSize(6);
+    doc.text(`${invoice.platform.website}`, pageWidth - margin, 29, { align: 'right' });
 
-    y = 36;
+    y = 40;
 
     // "On behalf of" line if present
     if (invoice.onBehalfOf) {
@@ -379,14 +393,16 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
 
     // Footer bar
     doc.setFillColor(...primaryColor);
-    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageWidth, 10, 'F');
+    doc.rect(0, doc.internal.pageSize.getHeight() - 14, pageWidth, 14, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(6);
-    doc.text(
-        `${invoice.platform.name} | ${invoice.platform.legalName} | ${invoice.platform.email}`,
-        pageWidth / 2, doc.internal.pageSize.getHeight() - 4, { align: 'center' }
-    );
+    const footerLine1 = `${invoice.platform.name} | GSTIN: ${invoice.platform.gstin} | FSSAI: ${invoice.platform.fssaiLicense}`;
+    doc.text(footerLine1, pageWidth / 2, doc.internal.pageSize.getHeight() - 9, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    const footerLine2 = `${invoice.platform.address} | Email: ${invoice.platform.email} | Web: ${invoice.platform.website}`;
+    doc.text(footerLine2, pageWidth / 2, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
 
     const arrayBuffer = doc.output('arraybuffer');
     return Buffer.from(arrayBuffer);

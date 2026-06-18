@@ -7,14 +7,14 @@ export const PLATFORM = {
     name: 'Delito',
     legalName: 'Delito',
     tagline: 'Food Delivery Platform',
-    address: 'Hathras, Uttar Pradesh, India',
-    gstin: '', // Add your GSTIN here, e.g. '09AABCD1234E1Z5'
-    fssaiLicense: '', // Add your FSSAI license here
-    pan: '', // Add your PAN here
-    cin: '', // Company CIN
-    email: 'support@delito.in',
+    address: 'Verma, Colony Gali No. 1, Hathras, Uttar Pradesh, India',
+    gstin: '09CAMPV6339R1ZD',
+    fssaiLicense: '22726884000160',
+    pan: '',
+    cin: '',
+    email: 'Delitosupportt@gmail.com',
     phone: '',
-    website: 'www.delito.in',
+    website: 'Delito.vercel.app',
 };
 
 // GST rates for food delivery (Restaurant Service)
