@@ -1,16 +1,39 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
+        // Parse optional date range query params
+        const { searchParams } = new URL(request.url);
+        const startDateParam = searchParams.get('startDate'); // ISO string e.g. '2026-07-01'
+        const endDateParam = searchParams.get('endDate');       // ISO string e.g. '2026-07-14'
+
+        const startDate = startDateParam ? new Date(startDateParam) : null;
+        const endDate = endDateParam ? new Date(endDateParam + 'T23:59:59.999Z') : null;
+
         // Use cached vendors (60s TTL) — vendor profiles change rarely
         const vendorDocs = await cachedCollection(collections.vendors);
 
         // Always fetch orders fresh — this is a financial calculation and must be accurate
         // Using cachedCollection here caused stale data and ₹0 pending when orders exist
         const ordersSnapshot = await db.collection(collections.orders).get();
-        const orderDocs = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Record<string, unknown> & { id: string }));
+        let orderDocs = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Record<string, unknown> & { id: string }));
+
+        // Filter orders by date range if provided
+        if (startDate || endDate) {
+            orderDocs = orderDocs.filter(order => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const rawCreatedAt = order.createdAt as any;
+                const orderDate = rawCreatedAt?.toDate?.() || (rawCreatedAt ? new Date(rawCreatedAt) : null);
+                if (!orderDate) return false;
+                const d = orderDate instanceof Date ? orderDate : new Date(orderDate);
+                if (isNaN(d.getTime())) return false;
+                if (startDate && d < startDate) return false;
+                if (endDate && d > endDate) return false;
+                return true;
+            });
+        }
 
         // Get payout history (small collection, fetch fresh)
         const payoutsSnapshot = await db.collection('vendorPayouts').orderBy('createdAt', 'desc').limit(200).get()
@@ -171,6 +194,18 @@ export async function GET() {
             });
         });
 
+        // Filter recentPayouts by date range if provided
+        const filteredRecentPayouts = (startDate || endDate)
+            ? recentPayouts.filter(p => {
+                if (!p.createdAt) return false;
+                const d = new Date(p.createdAt);
+                if (isNaN(d.getTime())) return false;
+                if (startDate && d < startDate) return false;
+                if (endDate && d > endDate) return false;
+                return true;
+            })
+            : recentPayouts;
+
         // Build vendor list with payout data
         const vendors = vendorDocs.map(data => {
             const payout = vendorPayouts[data.id] || {
@@ -233,7 +268,7 @@ export async function GET() {
             vendorsWithPending: vendors.filter(v => v.pendingAmount > 0).length,
         };
 
-        return NextResponse.json({ success: true, data: { vendors, recentPayouts, summary } });
+        return NextResponse.json({ success: true, data: { vendors, recentPayouts: filteredRecentPayouts, summary } });
     } catch (error) {
         console.error('Vendor payouts fetch error:', error);
         return NextResponse.json({ success: false, error: 'Failed to fetch vendor payouts' }, { status: 500 });

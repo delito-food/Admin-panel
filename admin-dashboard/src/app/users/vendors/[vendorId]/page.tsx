@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import {
     ArrowLeft, Store, Phone, Mail, MapPin, Star, Power, Ban, CheckCircle,
     IndianRupee, UtensilsCrossed, Clock, FileText, Tag, ShoppingBag, Loader2,
-    Calendar, Award, AlertTriangle, Shield
+    Calendar, Award, AlertTriangle, Shield, Edit2, X, Check
 } from 'lucide-react';
 import { apiPatch } from '@/hooks/useApi';
 
@@ -108,6 +108,10 @@ export default function VendorDetailPage() {
     const [updating, setUpdating] = useState(false);
     const [activeTab, setActiveTab] = useState<'menu' | 'offers'>('menu');
 
+    const [editingFssai, setEditingFssai] = useState(false);
+    const [newFssai, setNewFssai] = useState('');
+    const [savingFssai, setSavingFssai] = useState(false);
+
     useEffect(() => {
         const fetchVendor = async () => {
             try {
@@ -144,6 +148,19 @@ export default function VendorDetailPage() {
         await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates: { status: newStatus, isVerified: newStatus === 'active' } });
         setVendor({ ...vendor, status: newStatus, isVerified: newStatus === 'active' });
         setUpdating(false);
+    };
+
+    const handleSaveFssai = async () => {
+        if (!vendor) return;
+        setSavingFssai(true);
+        const result = await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates: { fssaiLicense: newFssai } });
+        if (result.success) {
+            setVendor({ ...vendor, fssaiLicense: newFssai });
+            setEditingFssai(false);
+        } else {
+            alert('Failed to update FSSAI License');
+        }
+        setSavingFssai(false);
     };
 
     if (loading) {
@@ -348,8 +365,8 @@ export default function VendorDetailPage() {
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {[
-                            { label: 'GST Number', value: vendor.gstNumber, verified: !!vendor.gstNumber },
-                            { label: 'FSSAI License', value: vendor.fssaiLicense, verified: !!vendor.fssaiLicense },
+                            { label: 'GST Number', value: vendor.gstNumber, verified: !!vendor.gstNumber, editable: false },
+                            { label: 'FSSAI License', value: vendor.fssaiLicense, verified: !!vendor.fssaiLicense, editable: true },
                         ].map(doc => (
                             <div key={doc.label} style={{
                                 padding: 14, borderRadius: 12,
@@ -357,9 +374,39 @@ export default function VendorDetailPage() {
                             }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                     <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground)' }}>{doc.label}</span>
-                                    {doc.verified && <CheckCircle size={14} color="#10B981" />}
+                                    {doc.editable ? (
+                                        editingFssai ? (
+                                            <div style={{ display: 'flex', gap: 4 }}>
+                                                <button onClick={handleSaveFssai} disabled={savingFssai} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#10B981', padding: 2 }}>
+                                                    {savingFssai ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                                                </button>
+                                                <button onClick={() => setEditingFssai(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#EF4444', padding: 2 }}>
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button onClick={() => { setEditingFssai(true); setNewFssai(vendor.fssaiLicense || ''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6366F1', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', fontWeight: 500 }}>
+                                                <Edit2 size={12} /> Edit
+                                            </button>
+                                        )
+                                    ) : (
+                                        doc.verified && <CheckCircle size={14} color="#10B981" />
+                                    )}
                                 </div>
-                                <p style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)', fontFamily: 'monospace' }}>{doc.value || 'Not provided'}</p>
+                                {doc.editable && editingFssai ? (
+                                    <input
+                                        type="text"
+                                        value={newFssai}
+                                        onChange={(e) => setNewFssai(e.target.value)}
+                                        placeholder="Enter FSSAI License"
+                                        style={{
+                                            width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
+                                            background: 'var(--bg)', color: 'var(--foreground)', fontSize: '0.8rem', outline: 'none'
+                                        }}
+                                    />
+                                ) : (
+                                    <p style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)', fontFamily: 'monospace' }}>{doc.value || 'Not provided'}</p>
+                                )}
                             </div>
                         ))}
                         <div style={{

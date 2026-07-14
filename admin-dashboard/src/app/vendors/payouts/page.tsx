@@ -92,7 +92,15 @@ function StatCard({ title, value, icon: Icon, color = 'primary' }: {
 }
 
 export default function VendorPayoutsPage() {
-    const { data, loading, refetch } = useApi<PayoutData>('/api/vendors/payouts');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    const queryParams = new URLSearchParams();
+    if (startDate) queryParams.append('startDate', startDate);
+    if (endDate) queryParams.append('endDate', endDate);
+    const endpoint = `/api/vendors/payouts${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+
+    const { data, loading, refetch } = useApi<PayoutData>(endpoint);
     const [searchTerm, setSearchTerm] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [showPayoutModal, setShowPayoutModal] = useState<VendorPayout | null>(null);
@@ -138,6 +146,15 @@ export default function VendorPayoutsPage() {
 
     const handleDownloadSlip = (payout: RecentPayout) => {
         const vendor = data?.vendors.find(v => v.vendorId === payout.vendorId);
+        let periodLabel = undefined;
+        if (startDate && endDate) {
+            periodLabel = `${new Date(startDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(endDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+        } else if (startDate) {
+            periodLabel = `From ${new Date(startDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+        } else if (endDate) {
+            periodLabel = `Until ${new Date(endDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+        }
+
         downloadPayoutSlip({
             recipientType: 'vendor',
             recipientName: payout.vendorName,
@@ -157,6 +174,7 @@ export default function VendorPayoutsPage() {
             totalEarnings: vendor?.totalRevenue,
             totalPaid: vendor?.paidAmount,
             pendingAfter: vendor ? Math.max(0, vendor.pendingAmount) : undefined,
+            periodLabel,
         });
     };
 
@@ -341,6 +359,52 @@ export default function VendorPayoutsPage() {
                         <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                         {refreshing ? 'Refreshing...' : 'Refresh'}
                     </button>
+                </div>
+            </div>
+
+            {/* Date Filter Bar */}
+            <div className="glass-card" style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--foreground-secondary)' }}>Filter Period:</span>
+                    <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        style={{
+                            padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
+                            background: 'var(--surface)', color: 'var(--foreground)', fontSize: '0.8rem',
+                        }}
+                    />
+                    <span style={{ color: 'var(--foreground-secondary)' }}>to</span>
+                    <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        style={{
+                            padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
+                            background: 'var(--surface)', color: 'var(--foreground)', fontSize: '0.8rem',
+                        }}
+                    />
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                        onClick={() => { setStartDate(''); setEndDate(''); }}
+                        style={{ padding: '6px 12px', borderRadius: 8, fontSize: '0.75rem', background: 'transparent', border: '1px solid var(--border)', color: 'var(--foreground)', cursor: 'pointer' }}
+                    >All Time</button>
+                    <button
+                        onClick={() => {
+                            const d = new Date(); d.setDate(1); setStartDate(d.toISOString().split('T')[0]);
+                            const end = new Date(); setEndDate(end.toISOString().split('T')[0]);
+                        }}
+                        style={{ padding: '6px 12px', borderRadius: 8, fontSize: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', cursor: 'pointer' }}
+                    >This Month</button>
+                    <button
+                        onClick={() => {
+                            const d = new Date(); d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1)); setStartDate(d.toISOString().split('T')[0]);
+                            const end = new Date(); setEndDate(end.toISOString().split('T')[0]);
+                        }}
+                        style={{ padding: '6px 12px', borderRadius: 8, fontSize: '0.75rem', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', cursor: 'pointer' }}
+                    >This Week</button>
                 </div>
             </div>
 

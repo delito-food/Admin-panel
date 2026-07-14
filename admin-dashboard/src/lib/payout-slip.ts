@@ -40,6 +40,9 @@ export interface PayoutSlipData {
     platformName?: string;
     platformLegalName?: string;
     platformEmail?: string;
+    
+    // Period filter
+    periodLabel?: string;
 }
 
 /**
@@ -101,9 +104,14 @@ export function generatePayoutSlipPDF(data: PayoutSlipData): Uint8Array {
     doc.text('PAYOUT SLIP', pageWidth - margin, 15, { align: 'right' });
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
+    let hdrY = 22;
+    if (data.periodLabel) {
+        doc.text(data.periodLabel, pageWidth - margin, hdrY, { align: 'right' });
+        hdrY += 5;
+    }
     const slipDate = data.confirmedAt || data.createdAt || new Date().toISOString();
-    doc.text(`Date: ${fmtDate(slipDate)}`, pageWidth - margin, 22, { align: 'right' });
-    doc.text(`Slip #: ${data.payoutId.slice(0, 12).toUpperCase()}`, pageWidth - margin, 27, { align: 'right' });
+    doc.text(`Date: ${fmtDate(slipDate)}`, pageWidth - margin, hdrY, { align: 'right' });
+    doc.text(`Slip #: ${data.payoutId.slice(0, 12).toUpperCase()}`, pageWidth - margin, hdrY + 5, { align: 'right' });
 
     y = 42;
 
