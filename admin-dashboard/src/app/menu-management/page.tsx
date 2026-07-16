@@ -68,6 +68,14 @@ export default function MenuManagementPage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [bulkProcessing, setBulkProcessing] = useState(false);
 
+    // Migration Tool State
+    const [migrationModalOpen, setMigrationModalOpen] = useState(false);
+    const [migrationOldId, setMigrationOldId] = useState('');
+    const [migrationNewId, setMigrationNewId] = useState('');
+    const [migrationStep, setMigrationStep] = useState<'search' | 'copy' | 'verify'>('search');
+    const [migrationStats, setMigrationStats] = useState<{itemCount: number, categoryCount: number} | null>(null);
+    const [migrationProcessing, setMigrationProcessing] = useState(false);
+
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
@@ -161,6 +169,62 @@ export default function MenuManagementPage() {
         }
     };
 
+    const handleMigrationSearch = async () => {
+        if (!migrationOldId.trim()) return;
+        setMigrationProcessing(true);
+        try {
+            const res = await fetch(`/api/menu-management/migration/search?oldVendorId=${migrationOldId}`);
+            const data = await res.json();
+            if (data.success) {
+                setMigrationStats(data.data);
+                if (data.data.itemCount > 0 || data.data.categoryCount > 0) {
+                    setMigrationStep('copy');
+                } else {
+                    alert('No items or categories found for this Vendor ID.');
+                }
+            } else {
+                alert(data.error || 'Failed to search');
+            }
+        } catch (e) {
+            alert('Network error');
+        } finally {
+            setMigrationProcessing(false);
+        }
+    };
+
+    const handleMigrationExecute = async (action: 'copy' | 'confirm' | 'revert') => {
+        if (action === 'copy' && !migrationNewId.trim()) return;
+        setMigrationProcessing(true);
+        try {
+            const res = await fetch(`/api/menu-management/migration/execute`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ oldVendorId: migrationOldId, newVendorId: migrationNewId, action })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (action === 'copy') {
+                    setMigrationStep('verify');
+                    fetchData(); // refresh to show copied data
+                } else {
+                    alert(data.message);
+                    setMigrationModalOpen(false);
+                    setMigrationStep('search');
+                    setMigrationOldId('');
+                    setMigrationNewId('');
+                    setMigrationStats(null);
+                    fetchData();
+                }
+            } else {
+                alert(data.error || 'Migration failed');
+            }
+        } catch (e) {
+            alert('Network error');
+        } finally {
+            setMigrationProcessing(false);
+        }
+    };
+
     const toggleSelectItem = (itemId: string) => {
         setSelectedIds(prev => {
             const next = new Set(prev);
@@ -239,17 +303,22 @@ export default function MenuManagementPage() {
     }
 
     return (
-        <div className="space-y-10" style={{ padding: 20 }}>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 40 }}>
             {/* Page Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="page-title">Menu Management</h1>
                     <p className="page-description">Review, approve and manage all vendor menu items</p>
                 </div>
-                <button onClick={handleRefresh} disabled={refreshing} className="btn btn-outline" style={{ opacity: refreshing ? 0.6 : 1 }}>
-                    <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-                    {refreshing ? 'Refreshing...' : 'Refresh'}
-                </button>
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button onClick={() => setMigrationModalOpen(true)} className="btn btn-primary bg-blue-600 border-none text-white hover:bg-blue-700" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                        Data Migration Tool
+                    </button>
+                    <button onClick={handleRefresh} disabled={refreshing} className="btn btn-outline" style={{ opacity: refreshing ? 0.6 : 1 }}>
+                        <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                </div>
             </div>
 
             {/* Stats */}
@@ -413,10 +482,15 @@ export default function MenuManagementPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    <span style={{ padding: '4px 12px', borderRadius: 20, background: 'rgba(244,81,30,0.08)', color: 'var(--primary)', fontSize: '0.78rem', fontWeight: 700 }}>{group.items.length} items</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                        <span style={{ padding: '4px 12px', borderRadius: 20, background: 'rgba(244,81,30,0.08)', color: 'var(--primary)', fontSize: '0.78rem', fontWeight: 700 }}>{group.items.length} items</span>
+                                        <a href={`/menu-management/vendor/${group.vendorId}`} style={{ padding: '6px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', fontSize: '0.78rem', fontWeight: 600, textDecoration: 'none' }}>
+                                            Manage Menu &rarr;
+                                        </a>
+                                    </div>
                                 </div>
                                 {/* Items Grid */}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12, padding: 16 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16, padding: 16 }}>
                                     {group.items.map(item => {
                                         const badge = getStatusBadge(item.verificationStatus);
                                         return (
@@ -582,6 +656,13 @@ export default function MenuManagementPage() {
                                                 >
                                                     <Eye size={16} />
                                                 </button>
+                                                <a
+                                                    href={`/menu-management/vendor/${item.vendorId}`}
+                                                    style={{ width: 34, height: 34, borderRadius: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--primary)', color: 'white', transition: 'all 0.2s', textDecoration: 'none' }}
+                                                    title="Manage Vendor Menu"
+                                                >
+                                                    <Edit3 size={16} />
+                                                </a>
                                             </div>
                                         </div>
                                     </motion.div>
@@ -814,6 +895,73 @@ export default function MenuManagementPage() {
                                         {actionModal.action === 'approve' ? 'Approve Item' : actionModal.action === 'reject' ? 'Reject Item' : 'Send Request'}
                                     </button>
                                 </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+
+                {/* Data Migration Modal */}
+                {migrationModalOpen && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                        <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl w-full max-w-lg overflow-hidden flex flex-col shadow-xl">
+                            <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-hover)]">
+                                <h2 className="text-lg font-bold">Menu Data Migration</h2>
+                                <button onClick={() => { setMigrationModalOpen(false); setMigrationStep('search'); setMigrationOldId(''); setMigrationNewId(''); }} className="p-1 hover:bg-[var(--surface)] rounded-md"><X size={20} /></button>
+                            </div>
+                            
+                            <div className="p-6 space-y-6">
+                                {migrationStep === 'search' && (
+                                    <div className="space-y-4">
+                                        <p className="text-sm text-[var(--foreground-secondary)]">
+                                            Find an orphaned vendor account to rescue its menu data. This usually happens when a vendor logs in with OTP and gets a new ID.
+                                        </p>
+                                        <div>
+                                            <label className="block text-xs font-semibold mb-1 text-[var(--foreground-secondary)]">Old Vendor ID (Orphaned)</label>
+                                            <input type="text" className="input w-full" value={migrationOldId} onChange={e => setMigrationOldId(e.target.value)} placeholder="e.g. jB9asdf2..." />
+                                        </div>
+                                        <button onClick={handleMigrationSearch} disabled={!migrationOldId || migrationProcessing} className="btn btn-primary w-full">
+                                            {migrationProcessing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Search for Orphaned Data'}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {migrationStep === 'copy' && migrationStats && (
+                                    <div className="space-y-4">
+                                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg text-blue-800 text-sm">
+                                            <strong>Data Found!</strong> {migrationStats.itemCount} menu items and {migrationStats.categoryCount} categories are ready to be migrated.
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold mb-1 text-[var(--foreground-secondary)]">New Vendor ID (Target)</label>
+                                            <input type="text" className="input w-full" value={migrationNewId} onChange={e => setMigrationNewId(e.target.value)} placeholder="Enter the new vendor's ID" />
+                                        </div>
+                                        <p className="text-xs text-[var(--foreground-secondary)]">
+                                            Clicking "Temporary Copy" will safely clone the data to the new ID so you can verify it in the vendor app before deleting the original.
+                                        </p>
+                                        <button onClick={() => handleMigrationExecute('copy')} disabled={!migrationNewId || migrationProcessing} className="btn btn-primary w-full bg-blue-600 hover:bg-blue-700 border-none text-white">
+                                            {migrationProcessing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Create Temporary Copy'}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {migrationStep === 'verify' && (
+                                    <div className="space-y-4 text-center">
+                                        <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                                            <AlertTriangle size={32} />
+                                        </div>
+                                        <h3 className="font-bold text-lg">Verify in Vendor App</h3>
+                                        <p className="text-sm text-[var(--foreground-secondary)] pb-4">
+                                            The data has been copied. Please ask the vendor to check their app. Are the menu items showing correctly?
+                                        </p>
+                                        <div className="flex gap-3">
+                                            <button onClick={() => handleMigrationExecute('revert')} disabled={migrationProcessing} className="btn btn-outline flex-1 border-red-200 text-red-500 hover:bg-red-50">
+                                                Revert Copy
+                                            </button>
+                                            <button onClick={() => handleMigrationExecute('confirm')} disabled={migrationProcessing} className="btn btn-primary flex-1 bg-green-600 hover:bg-green-700 border-none text-white">
+                                                Confirm & Erase Old
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     </motion.div>

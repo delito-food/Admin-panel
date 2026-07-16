@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,12 +18,14 @@ const isConfigValid = !!(firebaseConfig.apiKey && firebaseConfig.projectId);
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let storage: FirebaseStorage | null = null;
 
 if (isConfigValid) {
     // Initialize Firebase only if config is valid
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
 } else {
     console.warn(
         'Firebase config is missing. Please add your Firebase credentials to .env.local:\n' +
@@ -35,4 +38,4 @@ if (isConfigValid) {
     );
 }
 
-export { app, auth, db, isConfigValid };
+export { app, auth, db, storage, isConfigValid };

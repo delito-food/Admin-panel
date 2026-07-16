@@ -435,6 +435,15 @@ export default function VendorsPage() {
                                                         onClick={(e) => e.stopPropagation()}
                                                     >
                                                         <button
+                                                            onClick={() => {
+                                                                router.push(`/menu-management/vendor/${vendor.vendorId}`);
+                                                            }}
+                                                            className="dropdown-item"
+                                                        >
+                                                            <UtensilsCrossed size={14} className="text-[var(--foreground-secondary)]" />
+                                                            <span>Manage Menu</span>
+                                                        </button>
+                                                        <button
                                                             onClick={() => toggleVendorOnline(vendor.vendorId)}
                                                             className="dropdown-item"
                                                         >

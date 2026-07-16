@@ -275,3 +275,67 @@ export interface VerificationItem {
   submittedAt: string;
   details: Record<string, string | number | boolean>;
 }
+
+export interface MenuItemVariant {
+  variantId: string;
+  name: string;
+  price: number;
+  isDefault: boolean;
+}
+
+export interface MenuItemAddOn {
+  addOnId: string;
+  name: string;
+  price: number;
+  isVeg: boolean;
+}
+
+export interface MealCombo {
+  comboId: string;
+  name: string;
+  description: string;
+  extraPrice: number;
+}
+
+export interface AdminMenuItem {
+  itemId: string;
+  vendorId: string;
+  name: string;
+  description: string;
+  price: number;
+  categoryId: string;
+  categoryName: string;
+  imageUrl: string;
+  isVeg: boolean;
+  isAvailable: boolean;
+  preparationTime: number;
+  rating: number;
+  totalOrders: number;
+  isBestSeller: boolean;
+  discount: number;
+  subCategoryName: string;
+  tags: string[];
+  variants: MenuItemVariant[];
+  addOns: MenuItemAddOn[];
+  mealCombos: MealCombo[];
+  isVerified: boolean;
+  verificationStatus: string;
+  verificationNotes: string;
+  adminApprovedPrice: number;
+  adminNotes: string;
+  rejectionReason: string;
+  originalPrice: number;
+  priceChangedByAdmin: boolean;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface VendorCategory {
+  categoryId: string;
+  vendorId: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  sortOrder: number;
+  isActive: boolean;
+}

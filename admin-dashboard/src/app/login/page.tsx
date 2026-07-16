@@ -24,13 +24,10 @@ import {
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
-    const { user, login, signup, isConfigured } = useAuth();
+    const { user, login, isConfigured } = useAuth();
     const router = useRouter();
-    const [mode, setMode] = useState<'login' | 'signup'>('login');
-    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -61,11 +58,9 @@ export default function LoginPage() {
     }, [password]);
 
     const validations = useMemo(() => ({
-        name: name.trim().length >= 2,
         email: isValidEmail(email),
         password: password.length >= 8,
-        confirmPassword: password === confirmPassword && confirmPassword.length > 0,
-    }), [name, email, password, confirmPassword]);
+    }), [email, password]);
 
     const handleBlur = (field: string) => {
         setTouched(prev => ({ ...prev, [field]: true }));
@@ -76,34 +71,11 @@ export default function LoginPage() {
         setError('');
         setLoading(true);
 
-        if (mode === 'login') {
-            const success = await login(email, password);
-            if (success) {
-                router.push('/');
-            } else {
-                setError('Invalid email or password');
-            }
+        const success = await login(email, password);
+        if (success) {
+            router.push('/');
         } else {
-            if (!validations.name) {
-                setError('Please enter your full name');
-            } else if (!validations.email) {
-                setError('Please enter a valid email address');
-            } else if (!validations.password) {
-                setError('Password must be at least 8 characters');
-            } else if (!validations.confirmPassword) {
-                setError('Passwords do not match');
-            } else {
-                const success = await signup(name, email, password);
-                if (success) {
-                    setMode('login');
-                    setPassword('');
-                    setConfirmPassword('');
-                    setTouched({});
-                    setError('Account created! Please sign in.');
-                } else {
-                    setError('Signup failed. Please try again.');
-                }
-            }
+            setError('Invalid email or password');
         }
 
         setLoading(false);
@@ -336,7 +308,7 @@ export default function LoginPage() {
                     <div style={{ marginBottom: '32px' }}>
                         <AnimatePresence mode="wait">
                             <motion.div
-                                key={mode}
+                                key="login"
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -10 }}
@@ -347,12 +319,10 @@ export default function LoginPage() {
                                     color: 'var(--foreground)',
                                     marginBottom: '8px',
                                 }}>
-                                    {mode === 'login' ? 'Welcome back' : 'Create account'}
+                                    Welcome back
                                 </h2>
                                 <p style={{ color: 'var(--foreground-secondary)', fontSize: '15px' }}>
-                                    {mode === 'login'
-                                        ? 'Sign in to access your admin dashboard'
-                                        : 'Get started with your admin account'}
+                                    Sign in to access your admin dashboard
                                 </p>
                             </motion.div>
                         </AnimatePresence>
@@ -422,69 +392,6 @@ export default function LoginPage() {
 
                     <form onSubmit={handleSubmit}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                            {/* Name Field (Signup only) */}
-                            <AnimatePresence>
-                                {mode === 'signup' && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                    >
-                                        <label style={{
-                                            display: 'block',
-                                            fontSize: '14px',
-                                            fontWeight: 500,
-                                            color: 'var(--foreground)',
-                                            marginBottom: '8px',
-                                        }}>
-                                            Full Name
-                                        </label>
-                                        <div style={{ position: 'relative' }}>
-                                            <User
-                                                size={18}
-                                                style={{
-                                                    position: 'absolute',
-                                                    left: '14px',
-                                                    top: '50%',
-                                                    transform: 'translateY(-50%)',
-                                                    color: 'var(--foreground-secondary)',
-                                                }}
-                                            />
-                                            <input
-                                                type="text"
-                                                value={name}
-                                                onChange={(e) => setName(e.target.value)}
-                                                onBlur={() => handleBlur('name')}
-                                                placeholder="John Doe"
-                                                className="login-input"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '48px',
-                                                    paddingLeft: '44px',
-                                                    paddingRight: touched.name ? '44px' : '14px',
-                                                    borderRadius: 'var(--radius)',
-                                                    border: `1px solid ${touched.name && !validations.name ? 'var(--accent-error)' : touched.name && validations.name ? 'var(--accent-success)' : 'var(--border)'}`,
-                                                    background: 'var(--surface)',
-                                                    color: 'var(--foreground)',
-                                                    fontSize: '15px',
-                                                    outline: 'none',
-                                                    transition: 'all 0.2s',
-                                                }}
-                                                required
-                                            />
-                                            {touched.name && (
-                                                <div style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)' }}>
-                                                    {validations.name ? (
-                                                        <CheckCircle2 size={18} style={{ color: 'var(--accent-success)' }} />
-                                                    ) : (
-                                                        <AlertCircle size={18} style={{ color: 'var(--accent-error)' }} />
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
 
                             {/* Email Field */}
                             <div>
@@ -605,163 +512,73 @@ export default function LoginPage() {
                                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                     </button>
                                 </div>
-
-                                {/* Password Strength */}
-                                {mode === 'signup' && password && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: -5 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        style={{ marginTop: '10px' }}
-                                    >
-                                        <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
-                                            {[1, 2, 3, 4].map((level) => (
-                                                <div
-                                                    key={level}
-                                                    style={{
-                                                        height: '4px',
-                                                        flex: 1,
-                                                        borderRadius: '100px',
-                                                        background: level <= passwordStrength.score ? passwordStrength.color : 'var(--border)',
-                                                        transition: 'all 0.3s',
-                                                    }}
-                                                />
-                                            ))}
-                                        </div>
-                                        <p style={{ fontSize: '12px', color: passwordStrength.color }}>
-                                            {passwordStrength.label} password
-                                        </p>
-                                    </motion.div>
-                                )}
                             </div>
 
-                            {/* Confirm Password (Signup only) */}
-                            <AnimatePresence>
-                                {mode === 'signup' && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                    >
-                                        <label style={{
-                                            display: 'block',
-                                            fontSize: '14px',
-                                            fontWeight: 500,
-                                            color: 'var(--foreground)',
-                                            marginBottom: '8px',
-                                        }}>
-                                            Confirm Password
-                                        </label>
-                                        <div style={{ position: 'relative' }}>
-                                            <Lock
-                                                size={18}
-                                                style={{
-                                                    position: 'absolute',
-                                                    left: '14px',
-                                                    top: '50%',
-                                                    transform: 'translateY(-50%)',
-                                                    color: 'var(--foreground-secondary)',
-                                                }}
-                                            />
-                                            <input
-                                                type={showPassword ? 'text' : 'password'}
-                                                value={confirmPassword}
-                                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                                onBlur={() => handleBlur('confirmPassword')}
-                                                placeholder="Confirm your password"
-                                                className="login-input"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '48px',
-                                                    paddingLeft: '44px',
-                                                    paddingRight: touched.confirmPassword ? '44px' : '14px',
-                                                    borderRadius: 'var(--radius)',
-                                                    border: `1px solid ${touched.confirmPassword && !validations.confirmPassword ? 'var(--accent-error)' : touched.confirmPassword && validations.confirmPassword ? 'var(--accent-success)' : 'var(--border)'}`,
-                                                    background: 'var(--surface)',
-                                                    color: 'var(--foreground)',
-                                                    fontSize: '15px',
-                                                    outline: 'none',
-                                                    transition: 'all 0.2s',
-                                                }}
-                                                required
-                                            />
-                                            {touched.confirmPassword && (
-                                                <div style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)' }}>
-                                                    {validations.confirmPassword ? (
-                                                        <CheckCircle2 size={18} style={{ color: 'var(--accent-success)' }} />
-                                                    ) : (
-                                                        <AlertCircle size={18} style={{ color: 'var(--accent-error)' }} />
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+
 
                             {/* Remember & Forgot */}
-                            {mode === 'login' && (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setRememberMe(!rememberMe)}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '10px',
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            padding: 0,
-                                        }}
-                                    >
-                                        <div style={{
-                                            width: '20px',
-                                            height: '20px',
-                                            borderRadius: '6px',
-                                            border: `2px solid ${rememberMe ? 'var(--primary)' : 'var(--border)'}`,
-                                            background: rememberMe ? 'var(--primary)' : 'transparent',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            transition: 'all 0.2s',
-                                        }}>
-                                            {rememberMe && (
-                                                <motion.svg
-                                                    initial={{ scale: 0 }}
-                                                    animate={{ scale: 1 }}
-                                                    width="12"
-                                                    height="12"
-                                                    viewBox="0 0 12 12"
-                                                    fill="none"
-                                                >
-                                                    <path
-                                                        d="M2.5 6L5 8.5L9.5 3.5"
-                                                        stroke="white"
-                                                        strokeWidth="2"
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                    />
-                                                </motion.svg>
-                                            )}
-                                        </div>
-                                        <span style={{ fontSize: '14px', color: 'var(--foreground-secondary)' }}>Remember me</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            fontSize: '14px',
-                                            fontWeight: 500,
-                                            color: 'var(--primary)',
-                                            padding: 0,
-                                        }}
-                                    >
-                                        Forgot password?
-                                    </button>
-                                </div>
-                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setRememberMe(!rememberMe)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '10px',
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                    }}
+                                >
+                                    <div style={{
+                                        width: '20px',
+                                        height: '20px',
+                                        borderRadius: '6px',
+                                        border: `2px solid ${rememberMe ? 'var(--primary)' : 'var(--border)'}`,
+                                        background: rememberMe ? 'var(--primary)' : 'transparent',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'all 0.2s',
+                                    }}>
+                                        {rememberMe && (
+                                            <motion.svg
+                                                initial={{ scale: 0 }}
+                                                animate={{ scale: 1 }}
+                                                width="12"
+                                                height="12"
+                                                viewBox="0 0 12 12"
+                                                fill="none"
+                                            >
+                                                <path
+                                                    d="M2.5 6L5 8.5L9.5 3.5"
+                                                    stroke="white"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </motion.svg>
+                                        )}
+                                    </div>
+                                    <span style={{ fontSize: '14px', color: 'var(--foreground-secondary)' }}>Remember me</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: '14px',
+                                        fontWeight: 500,
+                                        color: 'var(--primary)',
+                                        padding: 0,
+                                        marginLeft: 'auto',
+                                    }}
+                                >
+                                    Forgot password?
+                                </button>
+                            </div>
 
                             {/* Submit Button */}
                             <button
@@ -792,11 +609,11 @@ export default function LoginPage() {
                                                 display: 'inline-block',
                                             }}
                                         />
-                                        {mode === 'login' ? 'Signing in...' : 'Creating account...'}
+                                        {loading ? 'Signing in...' : 'Sign In'}
                                     </span>
                                 ) : (
                                     <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                                        {mode === 'login' ? 'Sign In' : 'Create Account'}
+                                        Sign In
                                         <ArrowRight size={18} />
                                     </span>
                                 )}
@@ -804,30 +621,7 @@ export default function LoginPage() {
                         </div>
                     </form>
 
-                    {/* Switch mode */}
-                    <p style={{
-                        textAlign: 'center',
-                        marginTop: '24px',
-                        fontSize: '14px',
-                        color: 'var(--foreground-secondary)',
-                    }}>
-                        {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-                        <button
-                            type="button"
-                            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setTouched({}); setError(''); }}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                color: 'var(--primary)',
-                                padding: 0,
-                            }}
-                        >
-                            {mode === 'login' ? 'Sign up' : 'Sign in'}
-                        </button>
-                    </p>
+
 
                     {/* Footer */}
                     <p style={{

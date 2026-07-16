@@ -218,6 +218,13 @@ export default function VendorDetailPage() {
                     <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>{vendor.shopName}</h1>
                     <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>Vendor Profile & Management</p>
                 </div>
+                <button 
+                    onClick={() => router.push(`/menu-management/vendor/${vendor.vendorId}`)}
+                    className="btn btn-primary px-4 py-2 font-bold text-sm shadow-sm transition-transform hover:-translate-y-0.5 rounded-xl"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                    <UtensilsCrossed size={16} /> Manage Menu
+                </button>
             </div>
 
             {/* Profile Card */}

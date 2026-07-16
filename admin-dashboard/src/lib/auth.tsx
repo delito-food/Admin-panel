@@ -24,7 +24,6 @@ interface AuthContextType {
     isLoading: boolean;
     isConfigured: boolean;
     login: (email: string, password: string) => Promise<boolean>;
-    signup: (name: string, email: string, password: string) => Promise<boolean>;
     logout: () => void;
 }
 
@@ -103,50 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
-    const signup = async (name: string, email: string, password: string): Promise<boolean> => {
-        if (!auth) {
-            console.error('Firebase Auth is not configured');
-            return false;
-        }
-        try {
-            // Security: Only allow signup if no admins exist yet (first-time setup)
-            // or if there's already a logged-in admin (invite flow)
-            if (db) {
-                const adminsSnap = await getDoc(doc(db, 'admins', '__counter__'));
-                // If admins collection has entries and no user is logged in, block signup
-                if (!auth.currentUser) {
-                    const { getDocs, collection, limit, query } = await import('firebase/firestore');
-                    const q = query(collection(db, 'admins'), limit(1));
-                    const existingAdmins = await getDocs(q);
-                    if (!existingAdmins.empty) {
-                        console.error('Signup blocked: admins already exist. Contact existing admin for invite.');
-                        return false;
-                    }
-                }
-            }
 
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const firebaseUser = userCredential.user;
-            
-            // Update display name
-            await updateProfile(firebaseUser, { displayName: name });
-            
-            // Create admin document in Firestore
-            if (db) {
-                await setDoc(doc(db, 'admins', firebaseUser.uid), {
-                    name,
-                    email,
-                    role: 'admin',
-                    createdAt: new Date().toISOString(),
-                });
-            }
-            
-            return true;
-        } catch (error) {
-            console.error('Signup error:', error);
-            return false;
-        }
-    };
 
     const logout = async () => {
         if (!auth) {
@@ -162,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, isLoading, isConfigured: isConfigValid, login, signup, logout }}>
+        <AuthContext.Provider value={{ user, isLoading, isConfigured: isConfigValid, login, logout }}>
             {children}
         </AuthContext.Provider>
     );
