@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     ArrowLeft, Bike, Car, Phone, Mail, MapPin, Star, Power,
     Package, Loader2, AlertTriangle, Shield, Wallet,
