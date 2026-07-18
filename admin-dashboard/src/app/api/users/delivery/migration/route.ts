@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { db } from '@/lib/firebase-admin';
 
 export async function POST(request: Request) {
     try {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
         for (const coll of collections) {
             try {
-                const snapshot = await adminDb.collection(coll.name)
+                const snapshot = await db.collection(coll.name)
                     .where(coll.field, '==', oldDeliveryPersonId)
                     .get();
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
                 }
 
                 for (const chunk of chunks) {
-                    const batch = adminDb.batch();
+                    const batch = db.batch();
                     for (const doc of chunk) {
                         const updateData: any = { [coll.field]: newDeliveryPersonId };
                         // If it's deliveryPayouts and happens to have a deliveryPersonId field too, update it

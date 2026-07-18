@@ -154,8 +154,17 @@ export default function VendorDetailPage() {
     const toggleHidden = async () => {
         if (!vendor || updating) return;
         setUpdating(true);
-        await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates: { isHidden: !vendor.isHidden } });
-        setVendor({ ...vendor, isHidden: !vendor.isHidden });
+        const isCurrentlyHidden = vendor.adminForceOffline;
+        const updates = isCurrentlyHidden 
+            ? { adminForceOffline: false } 
+            : { adminForceOffline: true, isOnline: false };
+            
+        await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates });
+        setVendor({ 
+            ...vendor, 
+            adminForceOffline: !isCurrentlyHidden, 
+            isOnline: isCurrentlyHidden ? vendor.isOnline : false 
+        });
         setUpdating(false);
     };
 
@@ -361,11 +370,11 @@ export default function VendorDetailPage() {
                             <button
                                 onClick={toggleHidden}
                                 disabled={updating}
-                                className={`btn ${vendor.isHidden ? 'btn-primary' : 'btn-outline'}`}
+                                className={`btn ${vendor.adminForceOffline ? 'btn-primary' : 'btn-outline'}`}
                                 style={{ fontSize: '0.8rem', padding: '6px 14px', gap: 6 }}
                             >
                                 {updating ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
-                                {vendor.isHidden ? 'Unhide Vendor' : 'Hide Vendor'}
+                                {vendor.adminForceOffline ? 'Unhide Vendor' : 'Hide Vendor'}
                             </button>
                         </div>
                     </div>

@@ -153,17 +153,28 @@ export default function VendorsPage() {
 
         setUpdating(vendorId);
 
+        const isCurrentlyHidden = vendor.adminForceOffline;
+        const updates = isCurrentlyHidden 
+            ? { adminForceOffline: false } 
+            : { adminForceOffline: true, isOnline: false };
+
         const result = await apiPatch('/api/vendors', {
             vendorId,
-            updates: { isHidden: !vendor.isHidden }
+            updates
         });
 
         if (result.success) {
             setVendors(prev => prev.map(v =>
-                v.vendorId === vendorId ? { ...v, isHidden: !v.isHidden } : v
+                v.vendorId === vendorId 
+                    ? { ...v, adminForceOffline: !isCurrentlyHidden, isOnline: isCurrentlyHidden ? v.isOnline : false } 
+                    : v
             ));
             if (selectedVendor?.vendorId === vendorId) {
-                setSelectedVendor({ ...selectedVendor, isHidden: !selectedVendor.isHidden });
+                setSelectedVendor({ 
+                    ...selectedVendor, 
+                    adminForceOffline: !isCurrentlyHidden,
+                    isOnline: isCurrentlyHidden ? selectedVendor.isOnline : false
+                });
             }
         }
         setUpdating(null);
@@ -480,8 +491,8 @@ export default function VendorsPage() {
                                                             onClick={() => toggleVendorHidden(vendor.vendorId)}
                                                             className="dropdown-item"
                                                         >
-                                                            <Ban size={14} className={vendor.isHidden ? 'text-[var(--accent-success)]' : 'text-[var(--accent-error)]'} />
-                                                            <span>{vendor.isHidden ? 'Unhide Vendor' : 'Hide Vendor'}</span>
+                                                            <Ban size={14} className={vendor.adminForceOffline ? 'text-[var(--accent-success)]' : 'text-[var(--accent-error)]'} />
+                                                            <span>{vendor.adminForceOffline ? 'Unhide Vendor' : 'Hide Vendor'}</span>
                                                         </button>
                                                         <button
                                                             onClick={() => {

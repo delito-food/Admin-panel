@@ -225,6 +225,7 @@ export interface Vendor {
     registeredAt: string;
     status: string;
     isHidden?: boolean;
+    adminForceOffline?: boolean;
 }
 
 export interface Customer {
