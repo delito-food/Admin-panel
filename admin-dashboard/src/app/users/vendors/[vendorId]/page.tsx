@@ -57,6 +57,7 @@ interface VendorDetail {
     createdAt: string;
     registeredAt: string;
     status: string;
+    isHidden?: boolean;
 }
 
 const formatDate = (dateString: string) => {
@@ -147,6 +148,14 @@ export default function VendorDetailPage() {
         const newStatus = vendor.status === 'active' ? 'suspended' : 'active';
         await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates: { status: newStatus, isVerified: newStatus === 'active' } });
         setVendor({ ...vendor, status: newStatus, isVerified: newStatus === 'active' });
+        setUpdating(false);
+    };
+
+    const toggleHidden = async () => {
+        if (!vendor || updating) return;
+        setUpdating(true);
+        await apiPatch('/api/vendors', { vendorId: vendor.vendorId, updates: { isHidden: !vendor.isHidden } });
+        setVendor({ ...vendor, isHidden: !vendor.isHidden });
         setUpdating(false);
     };
 
@@ -348,6 +357,15 @@ export default function VendorDetailPage() {
                             >
                                 {updating ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
                                 {vendor.isOnline ? 'Set Offline' : 'Set Online'}
+                            </button>
+                            <button
+                                onClick={toggleHidden}
+                                disabled={updating}
+                                className={`btn ${vendor.isHidden ? 'btn-primary' : 'btn-outline'}`}
+                                style={{ fontSize: '0.8rem', padding: '6px 14px', gap: 6 }}
+                            >
+                                {updating ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
+                                {vendor.isHidden ? 'Unhide Vendor' : 'Hide Vendor'}
                             </button>
                         </div>
                     </div>

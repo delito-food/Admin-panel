@@ -25,6 +25,7 @@ export interface Vendor {
   averageDeliveryTime: number;
   createdAt: string;
   updatedAt: string;
+  isHidden?: boolean;
   // Verification fields
   verificationStatus?: 'pending' | 'approved' | 'rejected';
   verificationNotes?: string;

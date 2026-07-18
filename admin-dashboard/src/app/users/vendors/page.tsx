@@ -147,6 +147,29 @@ export default function VendorsPage() {
         setActionMenuId(null);
     };
 
+    const toggleVendorHidden = async (vendorId: string) => {
+        const vendor = vendors.find(v => v.vendorId === vendorId);
+        if (!vendor) return;
+
+        setUpdating(vendorId);
+
+        const result = await apiPatch('/api/vendors', {
+            vendorId,
+            updates: { isHidden: !vendor.isHidden }
+        });
+
+        if (result.success) {
+            setVendors(prev => prev.map(v =>
+                v.vendorId === vendorId ? { ...v, isHidden: !v.isHidden } : v
+            ));
+            if (selectedVendor?.vendorId === vendorId) {
+                setSelectedVendor({ ...selectedVendor, isHidden: !selectedVendor.isHidden });
+            }
+        }
+        setUpdating(null);
+        setActionMenuId(null);
+    };
+
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString('en-IN', {
             day: 'numeric',
@@ -400,6 +423,9 @@ export default function VendorsPage() {
                                                 {vendor.isOnline ? 'Online' : 'Offline'}
                                             </span>
                                         </div>
+                                        {vendor.isHidden && (
+                                            <span className="text-[10px] font-bold text-red-500 bg-red-100 dark:bg-red-900/30 px-2 py-0.5 rounded">HIDDEN</span>
+                                        )}
                                     </div>
 
                                     {/* Actions */}
@@ -449,6 +475,13 @@ export default function VendorsPage() {
                                                         >
                                                             <Power size={14} className={vendor.isOnline ? 'text-[var(--accent-error)]' : 'text-[var(--accent-success)]'} />
                                                             <span>{vendor.isOnline ? 'Set Offline' : 'Set Online'}</span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => toggleVendorHidden(vendor.vendorId)}
+                                                            className="dropdown-item"
+                                                        >
+                                                            <Ban size={14} className={vendor.isHidden ? 'text-[var(--accent-success)]' : 'text-[var(--accent-error)]'} />
+                                                            <span>{vendor.isHidden ? 'Unhide Vendor' : 'Hide Vendor'}</span>
                                                         </button>
                                                         <button
                                                             onClick={() => {
