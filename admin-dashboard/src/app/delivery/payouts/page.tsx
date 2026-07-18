@@ -757,7 +757,7 @@ export default function DeliveryPayoutsPage() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                             <span style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>Account</span>
                                             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)', fontFamily: 'monospace' }}>
-                                                ••••{showPayoutModal.bankDetails.accountNumber.slice(-4)}
+                                                {showPayoutModal.bankDetails.accountNumber}
                                             </span>
                                         </div>
                                     )}

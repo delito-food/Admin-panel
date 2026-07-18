@@ -209,7 +209,7 @@ export function generatePayoutSlipPDF(data: PayoutSlipData): Uint8Array {
 
         const bankRows: string[][] = [];
         if (data.bankDetails?.accountHolderName) bankRows.push(['Account Holder', data.bankDetails.accountHolderName]);
-        if (data.bankDetails?.accountNumber) bankRows.push(['Account Number', '••••' + data.bankDetails.accountNumber.slice(-4)]);
+        if (data.bankDetails?.accountNumber) bankRows.push(['Account Number', data.bankDetails.accountNumber]);
         if (data.bankDetails?.ifsc) bankRows.push(['IFSC Code', data.bankDetails.ifsc]);
         if (data.bankDetails?.bankName) bankRows.push(['Bank', data.bankDetails.bankName]);
         if (data.upiId) bankRows.push(['UPI ID', data.upiId]);
