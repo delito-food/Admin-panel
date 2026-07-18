@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import {
     ArrowLeft, Bike, Car, Phone, Mail, MapPin, Star, Power,
     Package, Loader2, AlertTriangle, Shield, Wallet,
-    IndianRupee, FileText, Calendar, CheckCircle, Ban
+    IndianRupee, FileText, Calendar, CheckCircle, Ban, RefreshCw
 } from 'lucide-react';
 import { apiPatch } from '@/hooks/useApi';
 
@@ -94,6 +94,11 @@ export default function DeliveryPersonDetailPage() {
     const [updating, setUpdating] = useState(false);
     const [suspending, setSuspending] = useState(false);
     const [photoError, setPhotoError] = useState(false);
+    
+    // Migration state
+    const [showMigrationModal, setShowMigrationModal] = useState(false);
+    const [oldDeliveryPersonId, setOldDeliveryPersonId] = useState('');
+    const [migrating, setMigrating] = useState(false);
 
     useEffect(() => {
         const fetchPerson = async () => {
@@ -155,6 +160,38 @@ export default function DeliveryPersonDetailPage() {
             } catch { alert('Network error'); }
             setSuspending(false);
         }
+    };
+
+    const handleMigrate = async () => {
+        if (!oldDeliveryPersonId.trim()) {
+            alert('Please enter the old Delivery Person ID.');
+            return;
+        }
+        if (!confirm('Are you sure you want to migrate data from this old ID? This cannot be undone.')) return;
+        
+        setMigrating(true);
+        try {
+            const res = await fetch('/api/users/delivery/migration', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    oldDeliveryPersonId: oldDeliveryPersonId.trim(), 
+                    newDeliveryPersonId: person?.deliveryPersonId 
+                }),
+            });
+            const result = await res.json();
+            if (result.success) {
+                alert(`✅ ${result.message}`);
+                setShowMigrationModal(false);
+                setOldDeliveryPersonId('');
+                window.location.reload();
+            } else {
+                alert(result.error || 'Migration failed');
+            }
+        } catch (err) {
+            alert('Network error');
+        }
+        setMigrating(false);
     };
 
     if (loading) {
@@ -348,6 +385,14 @@ export default function DeliveryPersonDetailPage() {
                         {/* Right: action button */}
                         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                             <button
+                                onClick={() => setShowMigrationModal(true)}
+                                className="btn btn-outline"
+                                style={{ fontSize: '0.8rem', padding: '6px 14px', gap: 6, borderColor: '#6366F1', color: '#6366F1' }}
+                            >
+                                <RefreshCw size={14} />
+                                Migrate Data
+                            </button>
+                            <button
                                 onClick={toggleOnline}
                                 disabled={updating}
                                 className={`btn ${person.isOnline ? 'btn-outline' : 'btn-primary'}`}
@@ -456,6 +501,77 @@ export default function DeliveryPersonDetailPage() {
                     </div>
                 </motion.div>
             </div>
+            
+            {/* Migration Modal */}
+            <AnimatePresence>
+                {showMigrationModal && (
+                    <div style={{
+                        position: 'fixed', inset: 0, zIndex: 100,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+                        padding: 20,
+                    }}>
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            style={{
+                                width: '100%', maxWidth: 450,
+                                background: 'var(--surface)', borderRadius: 20,
+                                border: '1px solid var(--border)',
+                                overflow: 'hidden',
+                                boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+                            }}
+                        >
+                            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
+                                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>Migrate Historical Data</h3>
+                            </div>
+                            
+                            <div style={{ padding: 24 }}>
+                                <div style={{ 
+                                    padding: 12, borderRadius: 12, background: 'rgba(99,102,241,0.1)', 
+                                    color: 'var(--foreground)', fontSize: '0.85rem', marginBottom: 20,
+                                    border: '1px solid rgba(99,102,241,0.2)'
+                                }}>
+                                    <p style={{ margin: '0 0 8px 0' }}>If this partner previously logged in with a password and recently switched to OTP, their old deliveries and earnings are tied to their old Account ID.</p>
+                                    <p style={{ margin: 0, fontWeight: 500 }}>Enter their old ID below to migrate all past data to this current account.</p>
+                                </div>
+                                
+                                <div className="form-group" style={{ marginBottom: 24 }}>
+                                    <label className="form-label" style={{ display: 'block', marginBottom: 8, fontSize: '0.85rem', fontWeight: 500 }}>Old Delivery Person ID (Firebase UID)</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g. 7abc123..."
+                                        value={oldDeliveryPersonId}
+                                        onChange={e => setOldDeliveryPersonId(e.target.value)}
+                                        style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--foreground)' }}
+                                    />
+                                </div>
+                            </div>
+                            
+                            <div style={{ padding: '16px 24px', background: 'var(--background)', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                                <button 
+                                    className="btn btn-outline" 
+                                    onClick={() => { setShowMigrationModal(false); setOldDeliveryPersonId(''); }}
+                                    disabled={migrating}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    className="btn btn-primary"
+                                    onClick={handleMigrate}
+                                    disabled={migrating || !oldDeliveryPersonId.trim()}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#6366F1', borderColor: '#6366F1', color: '#fff' }}
+                                >
+                                    {migrating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                    {migrating ? 'Migrating...' : 'Run Migration'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </motion.div>
     );
 }
