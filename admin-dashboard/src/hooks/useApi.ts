@@ -224,6 +224,7 @@ export interface Vendor {
     createdAt: string;
     registeredAt: string;
     status: string;
+    isHidden?: boolean;
 }
 
 export interface Customer {
