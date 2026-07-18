@@ -84,7 +84,7 @@ export async function GET() {
                 driverLicenseNumber: (data.driverLicenseNumber || '') as string,
                 driverLicenseUrl: (data.driverLicenseUrl || '') as string,
                 vehicleDocumentUrl: (data.vehicleDocumentUrl || '') as string,
-                profilePhotoUrl: (data.profilePhotoUrl || '') as string,
+                profilePhotoUrl: (data.profileImageUrl || data.profilePhotoUrl || '') as string,
                 bankName: (data.bankName || '') as string,
                 bankAccountNumber: (data.bankAccountNumber || '') as string,
                 ifscCode: (data.ifscCode || '') as string,
