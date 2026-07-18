@@ -247,6 +247,7 @@ export default function DeliveryPayoutsPage() {
     };
 
     const allPartners = data?.deliveryPartners
+        ?.filter(d => d.isVerified)
         ?.filter(d =>
             d.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
             d.phoneNumber.includes(searchTerm)

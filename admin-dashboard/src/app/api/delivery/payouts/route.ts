@@ -253,7 +253,7 @@ export async function GET() {
             return {
                 deliveryPersonId: doc.id,
                 fullName: data.fullName || 'Unknown',
-                profilePhotoUrl: data.profilePhotoUrl || '',
+                profilePhotoUrl: data.profileImageUrl || data.profilePhotoUrl || '',
                 phoneNumber: data.phoneNumber || '',
                 email: data.email || '',
                 city: data.city || '',
