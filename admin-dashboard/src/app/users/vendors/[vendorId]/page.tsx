@@ -58,6 +58,7 @@ interface VendorDetail {
     registeredAt: string;
     status: string;
     isHidden?: boolean;
+    adminForceOffline?: boolean;
 }
 
 const formatDate = (dateString: string) => {

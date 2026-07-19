@@ -154,6 +154,8 @@ export interface InvoiceData {
     billSummary: {
         itemTotal: number;
         discount: number;
+        deliveryDiscount: number;
+        hungerGameDiscount: number;
         deliveryFee: number;
         packagingFee: number;       // smallOrderSupportFee / platform fee
         tip: number;

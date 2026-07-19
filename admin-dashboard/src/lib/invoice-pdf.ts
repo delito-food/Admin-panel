@@ -276,6 +276,8 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     let lineCount = 0;
     if (bill.itemTotal > 0) lineCount++;
     if (bill.discount > 0) lineCount++;
+    if (bill.hungerGameDiscount > 0) lineCount++;
+    if (bill.deliveryDiscount > 0) lineCount++;
     if (bill.deliveryFee > 0) lineCount++;
     if (bill.packagingFee > 0) lineCount++;
     if (bill.tip > 0) lineCount++;
@@ -315,7 +317,9 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     };
 
     if (bill.itemTotal > 0) addLine('Item Total', bill.itemTotal);
-    if (bill.discount > 0) addLine('Discount', bill.discount, true);
+    if (bill.discount > 0) addLine('Food Disc.', bill.discount, true);
+    if (bill.hungerGameDiscount > 0) addLine('HungerGame Disc.', bill.hungerGameDiscount, true);
+    if (bill.deliveryDiscount > 0) addLine('Delivery Disc.', bill.deliveryDiscount, true);
     if (bill.deliveryFee > 0) addLine('Delivery Fee', bill.deliveryFee);
     if (bill.packagingFee > 0) addLine('Platform Fee', bill.packagingFee);
     if (bill.tip > 0) addLine('Tip', bill.tip);
