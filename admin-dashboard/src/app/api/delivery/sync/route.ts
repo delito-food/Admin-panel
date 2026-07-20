@@ -45,9 +45,9 @@ export async function POST(request: Request) {
                     const distanceKm = task.distanceKm || (task.deliveryDistanceMeters ?
                         (task.deliveryDistanceMeters || 0) / 1000 : 0);
 
-                    const deliveryEarnings = task.deliveryEarnings || task.deliveryPersonEarnings ||
-                        (distanceKm > 0 ? Math.max(15, Math.round((BASE_DELIVERY_FEE + (distanceKm * PER_KM_RATE)) * 10) / 10) :
-                        15); // ₹15 minimum
+                    const storedEarning = task.deliveryFee ?? task.deliveryEarnings ?? task.deliveryPersonEarnings;
+                    const deliveryEarnings = storedEarning ?? 
+                        Math.max(15, Math.round((BASE_DELIVERY_FEE + (distanceKm * PER_KM_RATE)) * 10) / 10);
 
                     const tip = task.tip || 0;
 
@@ -74,9 +74,9 @@ export async function POST(request: Request) {
                         if (status !== 'delivered' && status !== 'completed') return;
 
                         const distanceKm = order.distanceKm || 0;
-                        const deliveryPersonEarnings = order.deliveryPersonEarnings ||
-                            (distanceKm > 0 ? Math.max(15, Math.round((BASE_DELIVERY_FEE + (distanceKm * PER_KM_RATE)) * 10) / 10) :
-                            15); // ₹15 minimum
+                        const storedEarning = order.deliveryFee ?? order.deliveryPersonEarnings ?? order.deliveryEarnings;
+                        const deliveryPersonEarnings = storedEarning ?? 
+                            Math.max(15, Math.round((BASE_DELIVERY_FEE + (distanceKm * PER_KM_RATE)) * 10) / 10);
 
                         const tip = order.tip || 0;
 
