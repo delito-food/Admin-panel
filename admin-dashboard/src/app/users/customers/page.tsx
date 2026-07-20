@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
 import {
     Search,
     Filter,
@@ -33,6 +36,8 @@ export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
     const [showFilterDropdown, setShowFilterDropdown] = useState(false);
     const [actionMenuId, setActionMenuId] = useState<string | null>(null);
@@ -60,8 +65,41 @@ export default function CustomersPage() {
         const matchesStatus = statusFilter === 'All' ||
             customer.status.toLowerCase() === statusFilter.toLowerCase();
 
-        return matchesSearch && matchesStatus;
+        let matchesDate = true;
+        if (startDate || endDate) {
+            const customerDate = new Date(customer.registeredAt || customer.createdAt);
+            customerDate.setHours(0, 0, 0, 0);
+            
+            if (startDate) {
+                const start = new Date(startDate);
+                start.setHours(0, 0, 0, 0);
+                if (customerDate < start) matchesDate = false;
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(0, 0, 0, 0);
+                if (customerDate > end) matchesDate = false;
+            }
+        }
+
+        return matchesSearch && matchesStatus && matchesDate;
     });
+
+    const chartData = useMemo(() => {
+        const dailyCounts: Record<string, number> = {};
+        filteredCustomers.forEach(customer => {
+            const dateStr = new Date(customer.registeredAt || customer.createdAt).toISOString().split('T')[0];
+            dailyCounts[dateStr] = (dailyCounts[dateStr] || 0) + 1;
+        });
+        
+        return Object.entries(dailyCounts)
+            .map(([date, newCustomers]) => ({
+                date: new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+                timestamp: new Date(date).getTime(),
+                newCustomers
+            }))
+            .sort((a, b) => a.timestamp - b.timestamp);
+    }, [filteredCustomers]);
 
     const toggleCustomerStatus = async (customerId: string) => {
         const customer = customers.find(c => c.customerId === customerId);
@@ -169,6 +207,45 @@ export default function CustomersPage() {
                 </div>
             </section>
 
+            {/* Customer Gain Chart */}
+            <section>
+                <div className="section-header">
+                    <div className="section-title">
+                        <div className="icon"><TrendingUp size={18} /></div>
+                        Customer Gain
+                    </div>
+                </div>
+                <div className="glass-card p-6">
+                    {chartData.length > 0 ? (
+                        <div className="h-[300px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="colorCustomers" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+                                            <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                                    <XAxis dataKey="date" stroke="var(--foreground-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="var(--foreground-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)', borderRadius: '8px' }}
+                                        itemStyle={{ color: 'var(--primary)', fontWeight: 'bold' }}
+                                    />
+                                    <Area type="monotone" dataKey="newCustomers" name="New Customers" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorCustomers)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center h-[300px] text-[var(--foreground-secondary)]">
+                            <Users size={48} className="mb-4 opacity-20" />
+                            <p>No customer data available for the selected period</p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
             {/* Search and Filter */}
             <section>
                 <div className="section-header">
@@ -189,6 +266,24 @@ export default function CustomersPage() {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="input pl-10"
+                            />
+                        </div>
+                        
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="input w-full sm:w-auto text-sm"
+                                title="Start Date"
+                            />
+                            <span className="text-[var(--foreground-secondary)]">-</span>
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="input w-full sm:w-auto text-sm"
+                                title="End Date"
                             />
                         </div>
 
