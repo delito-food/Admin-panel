@@ -155,6 +155,14 @@ export default function OrdersPage() {
         }
     };
 
+    const getDisplayStatus = (status: string) => {
+        switch (status) {
+            case 'Preparing': return 'Accepted & Preparing';
+            case 'Sent for delivery': return 'Delivery partner assigned';
+            default: return status;
+        }
+    };
+
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
         const now = new Date();
@@ -433,7 +441,7 @@ export default function OrdersPage() {
                                 className="btn btn-outline w-full sm:w-auto"
                             >
                                 <Filter size={16} />
-                                {statusFilter}
+                                {getDisplayStatus(statusFilter)}
                                 <ChevronDown size={16} className={`transition-transform ${showFilterDropdown ? 'rotate-180' : ''}`} />
                             </button>
 
@@ -457,7 +465,7 @@ export default function OrdersPage() {
                                                     : 'hover:bg-[var(--surface-hover)]'
                                                     }`}
                                             >
-                                                {filter}
+                                                {getDisplayStatus(filter)}
                                             </button>
                                         ))}
                                     </motion.div>
@@ -530,7 +538,7 @@ export default function OrdersPage() {
                                             </span>
                                             <span className={`badge ${getStatusBadge(order.status)}`}>
                                                 {getStatusIcon(order.status)}
-                                                {order.status}
+                                                {getDisplayStatus(order.status)}
                                             </span>
                                             <button className="btn btn-ghost btn-icon-sm">
                                                 <Eye size={16} />
@@ -575,7 +583,7 @@ export default function OrdersPage() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <span className={`badge ${getStatusBadge(selectedOrder.status)}`}>
                                         {getStatusIcon(selectedOrder.status)}
-                                        {selectedOrder.status}
+                                        {getDisplayStatus(selectedOrder.status)}
                                     </span>
                                     {selectedOrder.status === 'Delivered' && (
                                         <button
