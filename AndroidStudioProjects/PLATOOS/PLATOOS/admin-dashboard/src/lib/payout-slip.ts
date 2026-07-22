@@ -40,6 +40,9 @@ export interface PayoutSlipData {
     platformName?: string;
     platformLegalName?: string;
     platformEmail?: string;
+    
+    // Period filter
+    periodLabel?: string;
 }
 
 /**
@@ -101,9 +104,14 @@ export function generatePayoutSlipPDF(data: PayoutSlipData): Uint8Array {
     doc.text('PAYOUT SLIP', pageWidth - margin, 15, { align: 'right' });
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
+    let hdrY = 22;
+    if (data.periodLabel) {
+        doc.text(data.periodLabel, pageWidth - margin, hdrY, { align: 'right' });
+        hdrY += 5;
+    }
     const slipDate = data.confirmedAt || data.createdAt || new Date().toISOString();
-    doc.text(`Date: ${fmtDate(slipDate)}`, pageWidth - margin, 22, { align: 'right' });
-    doc.text(`Slip #: ${data.payoutId.slice(0, 12).toUpperCase()}`, pageWidth - margin, 27, { align: 'right' });
+    doc.text(`Date: ${fmtDate(slipDate)}`, pageWidth - margin, hdrY, { align: 'right' });
+    doc.text(`Slip #: ${data.payoutId.slice(0, 12).toUpperCase()}`, pageWidth - margin, hdrY + 5, { align: 'right' });
 
     y = 42;
 
@@ -201,7 +209,7 @@ export function generatePayoutSlipPDF(data: PayoutSlipData): Uint8Array {
 
         const bankRows: string[][] = [];
         if (data.bankDetails?.accountHolderName) bankRows.push(['Account Holder', data.bankDetails.accountHolderName]);
-        if (data.bankDetails?.accountNumber) bankRows.push(['Account Number', '••••' + data.bankDetails.accountNumber.slice(-4)]);
+        if (data.bankDetails?.accountNumber) bankRows.push(['Account Number', data.bankDetails.accountNumber]);
         if (data.bankDetails?.ifsc) bankRows.push(['IFSC Code', data.bankDetails.ifsc]);
         if (data.bankDetails?.bankName) bankRows.push(['Bank', data.bankDetails.bankName]);
         if (data.upiId) bankRows.push(['UPI ID', data.upiId]);
