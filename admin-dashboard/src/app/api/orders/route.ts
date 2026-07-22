@@ -217,7 +217,7 @@ export async function GET(request: Request) {
                 tip: data.tip || 0,
                 smallOrderSupportFee: data.smallOrderSupportFee || 0,
                 total: data.total || 0,
-                status: (taskInfo?.taskStatus === 'DELIVERED' || taskInfo?.taskStatus === 'COMPLETED') ? 'Delivered' : (data.status || 'Pending'),
+                status: (data.status !== 'Cancelled' && data.status !== 'Cancelled by Admin' && (taskInfo?.taskStatus === 'DELIVERED' || taskInfo?.taskStatus === 'COMPLETED' || data.deliveryPinVerified === true || !!data.deliveredAt || !!data.completedAt)) ? 'Delivered' : (data.status || 'Pending'),
                 paymentMode: data.paymentMode || 'Cash on Delivery',
                 paymentStatus: data.paymentStatus || 'Pending',
                 deliveryAddress: data.deliveryAddress || '',
