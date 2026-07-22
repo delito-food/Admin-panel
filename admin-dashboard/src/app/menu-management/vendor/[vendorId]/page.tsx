@@ -14,6 +14,16 @@ import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import type { AdminMenuItem, VendorCategory } from '@/types';
 
+const AVAILABLE_TAGS = [
+    "thali", "combo", "meal bowl", "mini meal",
+    "vegan", "gluten-free", "healthy", "keto", "jain", "high-protein",
+    "spicy", "sweet", "crispy", "grilled", "roasted", "fried", "baked",
+    "north indian", "south indian", "chinese", "italian", "continental", "mexican", "street food", "mughlai", "bengali", "maharashtrian", "gujarati", "punjabi", "rajasthani", "kerala", "goan", "american", "lebanese", "thai", "japanese",
+    "breakfast", "lunch", "dinner", "snacks", "midnight cravings",
+    "biryani", "pizza", "burger", "sandwich", "roll", "wrap", "dosa", "idli", "paratha", "roti", "naan", "curry", "dal", "paneer", "chicken", "mutton", "fish", "prawns", "egg", "noodles", "pasta", "momos", "chaat", "soup", "salad", "dessert", "ice cream", "cake", "pastry", "beverage", "shake", "juice", "coffee", "tea",
+    "party", "festival special", "fasting", "vrat"
+];
+
 export default function VendorMenuManagement({ params }: { params: Promise<{ vendorId: string }> }) {
     const { vendorId } = use(params);
     const router = useRouter();
@@ -43,6 +53,8 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
         setToastMsg(msg);
         setTimeout(() => setToastMsg(''), 3000);
     };
+    
+    const [newTagInput, setNewTagInput] = useState('');
     
     // Form States
     const [itemForm, setItemForm] = useState<Partial<AdminMenuItem>>({});
@@ -779,6 +791,91 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
                                                                 </motion.div>
                                                             ))}
                                                         </AnimatePresence>
+                                                    </div>
+                                                </div>
+
+                                                <div className="w-full h-px bg-gradient-to-r from-transparent via-[var(--border)] to-transparent opacity-50"></div>
+
+                                                {/* Search Tags */}
+                                                <div className="flex flex-col gap-5">
+                                                    <div>
+                                                        <h4 className="text-base font-black text-[var(--foreground)] flex items-center gap-2">
+                                                            <Tag size={18} className="text-blue-500" /> Search Tags
+                                                        </h4>
+                                                        <p className="text-sm font-medium text-[var(--foreground-secondary)] mt-1.5">Add tags to improve discoverability in the customer app search bar.</p>
+                                                    </div>
+                                                    
+                                                    <div className="flex flex-col gap-3">
+                                                        <div className="flex flex-wrap gap-2 mb-2 p-4 border border-[var(--border)] rounded-lg bg-[var(--surface)] min-h-[60px]">
+                                                            {(!itemForm.tags || itemForm.tags.length === 0) && (
+                                                                <span className="text-[var(--foreground-secondary)] text-sm flex items-center h-full">No tags added yet.</span>
+                                                            )}
+                                                            {itemForm.tags?.map((tag, i) => (
+                                                                <span key={i} className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 rounded-full text-sm font-bold">
+                                                                    #{tag}
+                                                                    <button type="button" onClick={() => {
+                                                                        const nt = itemForm.tags?.filter((_, idx) => idx !== i);
+                                                                        setItemForm({...itemForm, tags: nt});
+                                                                    }} className="hover:text-red-500"><X size={14}/></button>
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Type a custom tag and click add..." 
+                                                                className="input text-sm flex-1 bg-transparent border-[var(--border)] rounded-lg px-4 py-2" 
+                                                                value={newTagInput} 
+                                                                onChange={e => setNewTagInput(e.target.value)} 
+                                                                onKeyDown={e => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.preventDefault();
+                                                                        const val = newTagInput.trim().toLowerCase();
+                                                                        if (val && !(itemForm.tags || []).includes(val)) {
+                                                                            setItemForm({...itemForm, tags: [...(itemForm.tags || []), val]});
+                                                                            setNewTagInput('');
+                                                                        }
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <button 
+                                                                type="button" 
+                                                                onClick={() => {
+                                                                    const val = newTagInput.trim().toLowerCase();
+                                                                    if (val && !(itemForm.tags || []).includes(val)) {
+                                                                        setItemForm({...itemForm, tags: [...(itemForm.tags || []), val]});
+                                                                        setNewTagInput('');
+                                                                    }
+                                                                }} 
+                                                                className="btn btn-primary px-4 py-2 text-sm rounded-lg"
+                                                            >
+                                                                Add
+                                                            </button>
+                                                        </div>
+                                                        <div className="mt-4">
+                                                            <p className="text-xs font-bold mb-2 text-[var(--foreground-secondary)] uppercase tracking-wider">Quick Add Tags</p>
+                                                            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                                                                {AVAILABLE_TAGS.map(tag => {
+                                                                    const isSelected = (itemForm.tags || []).includes(tag);
+                                                                    return (
+                                                                        <button 
+                                                                            key={tag} 
+                                                                            type="button" 
+                                                                            onClick={() => {
+                                                                                if (isSelected) {
+                                                                                    setItemForm({...itemForm, tags: itemForm.tags?.filter(t => t !== tag)});
+                                                                                } else {
+                                                                                    setItemForm({...itemForm, tags: [...(itemForm.tags || []), tag]});
+                                                                                }
+                                                                            }}
+                                                                            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${isSelected ? 'bg-[var(--primary)] border-[var(--primary)] text-white' : 'bg-transparent border-[var(--border)] text-[var(--foreground-secondary)] hover:border-[var(--primary)] hover:text-[var(--primary)]'}`}
+                                                                        >
+                                                                            {tag}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
 
