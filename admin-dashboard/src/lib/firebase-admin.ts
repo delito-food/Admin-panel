@@ -113,6 +113,7 @@ export const collections = {
     deliveryTasks: 'deliveryTasks',
     deliveryHistory: 'deliveryHistory',
     wallets: 'wallets',
+    pushNotifications: 'pushNotifications',
 } as const;
 
 // Check if Firebase is available
@@ -166,6 +167,76 @@ export async function sendPushNotification(
         // Non-fatal — log but don't throw
         console.warn(`FCM send failed for ${recipientType}/${recipientId}:`, err);
     }
+}
+
+/**
+ * Send FCM push notifications to multiple users at once.
+ * Batches tokens in groups of 500 (FCM multicast limit).
+ */
+export async function sendBulkPushNotification(
+    tokens: string[],
+    title: string,
+    body: string,
+    imageUrl?: string,
+    extraData: Record<string, string> = {}
+): Promise<{ successCount: number; failureCount: number; failedTokens: string[] }> {
+    const adminApp = initFirebaseAdmin();
+    if (!adminApp || tokens.length === 0) {
+        return { successCount: 0, failureCount: 0, failedTokens: [] };
+    }
+
+    const messaging = getMessaging(adminApp);
+    const BATCH_SIZE = 500;
+    let successCount = 0;
+    let failureCount = 0;
+    const failedTokens: string[] = [];
+
+    for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+        const batch = tokens.slice(i, i + BATCH_SIZE);
+        try {
+            const message: any = {
+                tokens: batch,
+                data: {
+                    title,
+                    message: body,
+                    type: 'promotional',
+                    ...extraData,
+                },
+                notification: {
+                    title,
+                    body,
+                    ...(imageUrl ? { imageUrl } : {}),
+                },
+                android: {
+                    priority: 'high' as const,
+                    notification: {
+                        channelId: 'promotions_v1',
+                        ...(imageUrl ? { imageUrl } : {}),
+                    },
+                },
+            };
+
+            if (imageUrl) {
+                message.data.imageUrl = imageUrl;
+            }
+
+            const response = await messaging.sendEachForMulticast(message);
+            successCount += response.successCount;
+            failureCount += response.failureCount;
+
+            // Track failed tokens (cap at 50 for storage)
+            response.responses.forEach((resp, idx) => {
+                if (!resp.success && failedTokens.length < 50) {
+                    failedTokens.push(batch[idx]);
+                }
+            });
+        } catch (err) {
+            console.error(`FCM multicast batch failed (offset ${i}):`, err);
+            failureCount += batch.length;
+        }
+    }
+
+    return { successCount, failureCount, failedTokens };
 }
 
 // ── Server-side in-memory cache ──

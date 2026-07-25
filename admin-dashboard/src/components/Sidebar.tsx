@@ -32,6 +32,7 @@ import {
     Coins,
     FileText,
     AlertTriangle,
+    Bell,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
@@ -66,6 +67,11 @@ const navigation: NavItem[] = [
         label: 'Special Offers',
         href: '/special-offers',
         icon: <Sparkles size={20} />,
+    },
+    {
+        label: 'Push Notifications',
+        href: '/push-notifications',
+        icon: <Bell size={20} />,
     },
     {
         label: 'Users',
