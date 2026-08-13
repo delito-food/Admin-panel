@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useApi } from '@/hooks/useApi';
+import { downloadAuthenticatedFile } from '@/lib/api-client';
 
 export default function HSNSummaryPage() {
     const [dateFrom, setDateFrom] = useState('');
@@ -39,11 +40,16 @@ export default function HSNSummaryPage() {
         setTimeout(() => setRefreshing(false), 500);
     };
 
-    const handleDownloadCSV = () => {
+    const handleDownloadCSV = async () => {
         let url = '/api/reports/hsn?format=csv';
         if (dateFrom) url += `&from=${dateFrom}`;
         if (dateTo) url += `&to=${dateTo}`;
-        window.open(url, '_blank');
+        // /api/* needs a bearer token — a plain window.open() navigation cannot carry it
+        try {
+            await downloadAuthenticatedFile(url, 'HSN_Summary_Report.csv');
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'CSV download failed');
+        }
     };
 
     const handleDownloadPDF = async () => {
@@ -52,17 +58,8 @@ export default function HSNSummaryPage() {
             let url = '/api/reports/hsn?format=pdf';
             if (dateFrom) url += `&from=${dateFrom}`;
             if (dateTo) url += `&to=${dateTo}`;
-            const res = await fetch(url);
-            if (!res.ok) { alert('Failed to generate PDF'); return; }
-            const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'HSN_Summary_Report.pdf';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(a.href);
-        } catch { alert('PDF download failed'); }
+            await downloadAuthenticatedFile(url, 'HSN_Summary_Report.pdf');
+        } catch (err) { alert(err instanceof Error ? err.message : 'PDF download failed'); }
         finally { setDownloadingPDF(false); }
     };
 

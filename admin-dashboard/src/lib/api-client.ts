@@ -28,6 +28,51 @@ export async function authenticatedFetch(
 }
 
 /**
+ * Download a file from an authenticated /api/* endpoint.
+ *
+ * IMPORTANT: never use window.open()/anchor navigation for /api/* downloads.
+ * A browser navigation cannot carry the Authorization header, so middleware.ts
+ * rejects it with "Unauthorized — missing authentication token". This helper
+ * fetches the file with the bearer token, then saves the resulting blob.
+ *
+ * The filename from the response's Content-Disposition header wins; otherwise
+ * `fallbackName` is used.
+ */
+export async function downloadAuthenticatedFile(
+    url: string,
+    fallbackName: string
+): Promise<void> {
+    const res = await authenticatedFetch(url);
+
+    if (!res.ok) {
+        let message = `Download failed (${res.status})`;
+        try {
+            const body = await res.json();
+            if (body?.error) message = body.error;
+        } catch {
+            // Response wasn't JSON — keep the generic message
+        }
+        throw new Error(message);
+    }
+
+    // Prefer the server-provided filename
+    let filename = fallbackName;
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    if (match?.[1]) filename = decodeURIComponent(match[1]);
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+}
+
+/**
  * Monkey-patch global fetch for /api/* calls to auto-attach auth tokens.
  * This ensures ALL fetch('/api/...') calls from any page component are authenticated,
  * even if they don't explicitly use authenticatedFetch.

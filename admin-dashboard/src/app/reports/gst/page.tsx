@@ -12,6 +12,7 @@ import {
     ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts';
 import { useApi } from '@/hooks/useApi';
+import { downloadAuthenticatedFile } from '@/lib/api-client';
 
 // ─── Types (mirror /api/reports/gst) ───
 
@@ -217,6 +218,7 @@ export default function GSTReportPage() {
     const [appliedEnd, setAppliedEnd] = useState('');
     const [showDateFilter, setShowDateFilter] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [exporting, setExporting] = useState<string | null>(null);
 
     const buildQuery = (s: string, e: string) => {
         const params = new URLSearchParams();
@@ -253,14 +255,25 @@ export default function GSTReportPage() {
 
     const isFiltered = !!(appliedStart || appliedEnd);
 
-    const exportSection = (section: string) => {
-        const params = new URLSearchParams();
-        if (appliedStart) params.set('startDate', appliedStart);
-        if (appliedEnd) params.set('endDate', appliedEnd);
-        params.set('format', 'csv');
-        params.set('section', section);
-        window.open(`/api/reports/gst?${params.toString()}`, '_blank');
+    const exportSection = async (section: string) => {
         setShowExportMenu(false);
+        setExporting(section);
+        try {
+            const params = new URLSearchParams();
+            if (appliedStart) params.set('startDate', appliedStart);
+            if (appliedEnd) params.set('endDate', appliedEnd);
+            params.set('format', 'csv');
+            params.set('section', section);
+            // Must go through authenticatedFetch — /api/* requires a bearer token
+            await downloadAuthenticatedFile(
+                `/api/reports/gst?${params.toString()}`,
+                `GST-${section}.csv`
+            );
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Export failed. Please try again.');
+        } finally {
+            setExporting(null);
+        }
     };
 
     const inr = (amount: number) =>
@@ -365,8 +378,16 @@ export default function GSTReportPage() {
 
                     {/* Export menu */}
                     <div style={{ position: 'relative' }}>
-                        <button onClick={() => { setShowExportMenu(v => !v); setShowDateFilter(false); }} className="btn btn-outline">
-                            <Download size={16} /> Export <ChevronDown size={14} />
+                        <button
+                            onClick={() => { setShowExportMenu(v => !v); setShowDateFilter(false); }}
+                            className="btn btn-outline"
+                            disabled={!!exporting}
+                        >
+                            {exporting
+                                ? <Loader2 size={16} className="animate-spin" />
+                                : <Download size={16} />}
+                            {exporting ? 'Exporting…' : 'Export'}
+                            <ChevronDown size={14} />
                         </button>
                         {showExportMenu && (
                             <div className="dropdown-panel" style={{ minWidth: 240, gap: 2, padding: 6 }}>

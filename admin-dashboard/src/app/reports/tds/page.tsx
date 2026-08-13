@@ -17,6 +17,7 @@ import {
     Search,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { downloadAuthenticatedFile } from '@/lib/api-client';
 
 type Section = '194O' | '194C' | 'vendor-1pct';
 
@@ -51,11 +52,16 @@ export default function TDSReportPage() {
         setTimeout(() => setRefreshing(false), 500);
     };
 
-    const handleDownloadCSV = () => {
+    const handleDownloadCSV = async () => {
         let url = `/api/reports/tds?section=${section}&format=csv`;
         if (dateFrom) url += `&from=${dateFrom}`;
         if (dateTo) url += `&to=${dateTo}`;
-        window.open(url, '_blank');
+        // /api/* needs a bearer token — a plain window.open() navigation cannot carry it
+        try {
+            await downloadAuthenticatedFile(url, `TDS_${section}_Report.csv`);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'CSV download failed');
+        }
     };
 
     const handleDownloadPDF = async () => {
@@ -64,17 +70,8 @@ export default function TDSReportPage() {
             let url = `/api/reports/tds?section=${section}&format=pdf`;
             if (dateFrom) url += `&from=${dateFrom}`;
             if (dateTo) url += `&to=${dateTo}`;
-            const res = await fetch(url);
-            if (!res.ok) { alert('Failed to generate PDF'); return; }
-            const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `TDS_${section}_Report.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(a.href);
-        } catch { alert('PDF download failed'); }
+            await downloadAuthenticatedFile(url, `TDS_${section}_Report.pdf`);
+        } catch (err) { alert(err instanceof Error ? err.message : 'PDF download failed'); }
         finally { setDownloadingPDF(false); }
     };
 
