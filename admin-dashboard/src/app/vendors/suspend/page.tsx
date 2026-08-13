@@ -198,7 +198,7 @@ export default function SuspendedVendorsPage() {
                     </div>
                 ) : activeTab === 'suspended' ? (
                     /* Suspended Vendors List */
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-sm overflow-hidden table-scroll">
                         {suspendedVendors.length === 0 ? (
                             <div className="text-center py-12 text-gray-500">
                                 <p className="text-5xl mb-4">✅</p>
@@ -254,7 +254,7 @@ export default function SuspendedVendorsPage() {
                     </div>
                 ) : (
                     /* All Active Vendors List */
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-sm overflow-hidden table-scroll">
                         <table className="w-full">
                             <thead className="bg-gray-50">
                                 <tr>

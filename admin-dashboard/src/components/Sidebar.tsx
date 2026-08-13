@@ -90,6 +90,7 @@ const navigation: NavItem[] = [
             { label: 'Commission', href: '/vendors/commission' },
             { label: 'Commission Invoices', href: '/vendors/commission-invoices' },
             { label: 'Payouts', href: '/vendors/payouts' },
+            { label: 'Business Hours', href: '/vendors/business-hours' },
             { label: 'Online/Offline', href: '/vendors/status' },
         ],
     },
@@ -191,7 +192,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             initial={false}
             animate={{ width: collapsed ? 80 : 280 }}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-            className="sidebar-premium"
+            /* is-collapsed / is-open drive the off-canvas drawer behaviour on phones */
+            className={`sidebar-premium ${collapsed ? 'is-collapsed' : 'is-open'}`}
         >
             {/* Logo Section */}
             <div className="sidebar-header">

@@ -57,6 +57,7 @@ export async function GET(request: Request) {
                 isBestSeller: (item.isBestSeller || false) as boolean,
                 discount: (item.discount || 0) as number,
                 preparationTime: (item.preparationTime || 0) as number,
+                tags: (item.tags || []) as string[],
                 verificationStatus: (item.verificationStatus || 'approved') as string,
                 adminNotes: (item.adminNotes || '') as string,
                 rejectionReason: (item.rejectionReason || '') as string,
@@ -106,7 +107,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
     try {
         const body = await request.json();
-        const { itemId, action, adminApprovedPrice, adminNotes, rejectionReason } = body;
+        const { itemId, action, adminApprovedPrice, adminNotes, rejectionReason, tags } = body;
 
         if (!itemId || !action) {
             return NextResponse.json(
@@ -115,9 +116,9 @@ export async function PATCH(request: Request) {
             );
         }
 
-        if (!['approve', 'reject', 'request_changes'].includes(action)) {
+        if (!['approve', 'reject', 'request_changes', 'update_tags'].includes(action)) {
             return NextResponse.json(
-                { success: false, error: 'Invalid action. Must be approve, reject, or request_changes' },
+                { success: false, error: 'Invalid action. Must be approve, reject, request_changes, or update_tags' },
                 { status: 400 }
             );
         }
@@ -160,6 +161,8 @@ export async function PATCH(request: Request) {
             updates.verificationStatus = 'changes_requested';
             updates.adminNotes = adminNotes || 'Please make changes and resubmit';
             updates.isAvailable = false;
+        } else if (action === 'update_tags') {
+            updates.tags = tags || [];
         }
 
         await itemRef.update(updates);
@@ -188,7 +191,9 @@ export async function PATCH(request: Request) {
                 ? 'Menu item approved successfully'
                 : action === 'reject'
                     ? 'Menu item rejected'
-                    : 'Changes requested from vendor',
+                    : action === 'update_tags'
+                        ? 'Tags updated successfully'
+                        : 'Changes requested from vendor',
         });
     } catch (error) {
         console.error('Menu management update error:', error);

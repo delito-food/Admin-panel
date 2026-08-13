@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { InvoiceData } from './invoice-constants';
+import { InvoiceData, formatInvoiceNumber } from './invoice-constants';
 import { DELITO_LOGO_BASE64 } from './delito-logo';
 
 /**
@@ -55,7 +55,7 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     doc.text(invoice.invoiceType, pageWidth - margin, 12, { align: 'right' });
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Invoice #: ${invoice.invoiceNumber}`, pageWidth - margin, 18, { align: 'right' });
+    doc.text(`Invoice #: ${formatInvoiceNumber(invoice.invoiceNumber)}`, pageWidth - margin, 18, { align: 'right' });
     doc.text(`Date: ${invoice.invoiceDate}`, pageWidth - margin, 24, { align: 'right' });
     doc.setFontSize(6);
     doc.text(`${invoice.platform.website}`, pageWidth - margin, 29, { align: 'right' });
@@ -272,9 +272,11 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     const summaryX = pageWidth - margin - summaryWidth;
 
     const bill = invoice.billSummary;
+    const itemDiscount = bill.itemDiscount || 0;
     // Count only non-zero lines
     let lineCount = 0;
     if (bill.itemTotal > 0) lineCount++;
+    if (itemDiscount > 0) lineCount++;   // gross item total + item discount line
     if (bill.discount > 0) lineCount++;
     if (bill.hungerGameDiscount > 0) lineCount++;
     if (bill.deliveryDiscount > 0) lineCount++;
@@ -316,7 +318,13 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
         sy += 4.5;
     };
 
-    if (bill.itemTotal > 0) addLine('Item Total', bill.itemTotal);
+    // Gross → discount → net, so the arithmetic on the invoice always adds up
+    if (itemDiscount > 0) {
+        addLine('Item Total (Gross)', roundTo2(bill.itemTotal + itemDiscount));
+        addLine('Item Discount', itemDiscount, true);
+    } else if (bill.itemTotal > 0) {
+        addLine('Item Total', bill.itemTotal);
+    }
     if (bill.discount > 0) addLine('Food Disc.', bill.discount, true);
     if (bill.hungerGameDiscount > 0) addLine('HungerGame Disc.', bill.hungerGameDiscount, true);
     if (bill.deliveryDiscount > 0) addLine('Delivery Disc.', bill.deliveryDiscount, true);
@@ -414,6 +422,8 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
 
 /** Plain currency format */
 function fmtC(n: number): string { return n.toFixed(2); }
+
+function roundTo2(n: number): number { return Math.round(n * 100) / 100; }
 
 /**
  * Convert number to words for Indian currency

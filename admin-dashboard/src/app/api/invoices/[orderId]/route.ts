@@ -7,6 +7,7 @@ import {
     GST_RATES,
     HSN_CODES,
     generateInvoiceNumber,
+    formatInvoiceNumber,
     type InvoiceData,
     type InvoiceItem,
     type TaxSummaryRow,
@@ -86,12 +87,14 @@ async function buildInvoiceData(orderId: string): Promise<InvoiceData> {
     const items: InvoiceItem[] = (order.items || []).map((item: any, index: number) => {
         const unitPrice = item.price || 0;
         const quantity = item.quantity || 1;
-        const originalPrice = item.originalPrice || unitPrice;
+        // `originalPrice` is the pre-offer unit price written by the app
+        // (base + add-ons + combo). Fall back through every historical field name.
+        const originalPrice = item.originalPrice ?? item.mrp ?? item.basePrice ?? unitPrice;
         const effectivePrice = (item.discountedPrice != null && item.discountedPrice < originalPrice)
             ? item.discountedPrice : unitPrice;
 
         const lineTotal = effectivePrice * quantity;
-        const itemDiscount = (originalPrice - effectivePrice) * quantity;
+        const itemDiscount = Math.max(0, (originalPrice - effectivePrice) * quantity);
 
         // Price is already tax-exclusive — taxableValue = lineTotal directly
         const taxableValue = roundTo2(lineTotal);
@@ -115,16 +118,50 @@ async function buildInvoiceData(orderId: string): Promise<InvoiceData> {
     });
 
     // 5. Bill summary — extract order-level amounts
-    const deliveryDiscount = order.discount || 0;
-    const hungerGameDiscount = order.hungerGameDiscount || 0;
+    //
+    // Discounts live in several different fields depending on where they came
+    // from. `order.discount` only ever holds the delivery discount, which is why
+    // reading it alone made every discount column read 0.
+    //
+    //   item lines            → originalPrice - price   (menu / special offer)
+    //   originalItemTotal     → itemTotal               (same, order-level fallback)
+    //   promoDiscount         → promo code
+    //   coinDiscount          → Delito coins redeemed
+    //   hungerGameLevel1/     → HungerGame rewards on food
+    //   Coupon/Level5
+    //   hungerGameLevel2      → HungerGame free delivery
+    //   deliveryDiscount /    → delivery fee waiver
+    //   discount
+    //
+    const itemLineDiscount = roundTo2(items.reduce((sum, i) => sum + (i.discount || 0), 0));
+    const originalItemTotal = order.originalItemTotal || 0;
+    const storedItemTotal = order.itemTotal ?? order.subtotal ?? 0;
+    const orderLevelItemDiscount = originalItemTotal > storedItemTotal
+        ? roundTo2(originalItemTotal - storedItemTotal)
+        : 0;
+    // Prefer whichever source actually carries a value (they describe the same thing)
+    const itemDiscount = Math.max(itemLineDiscount, orderLevelItemDiscount);
+
+    const hungerGameTotal = order.hungerGameDiscount || 0;
     const hungerGameLevel1Discount = order.hungerGameLevel1Discount || 0;
     const hungerGameCouponDiscount = order.hungerGameCouponDiscount || 0;
     const hungerGameLevel5Savings = order.hungerGameLevel5Savings || 0;
-    
-    const discount = hungerGameDiscount > 0
-        ? hungerGameDiscount
-        : (hungerGameLevel1Discount + hungerGameCouponDiscount + hungerGameLevel5Savings);
-        
+    const hungerGameDeliveryDiscount = order.hungerGameLevel2DeliveryDiscount || 0;
+
+    const hungerGameComponents = hungerGameLevel1Discount + hungerGameCouponDiscount + hungerGameLevel5Savings;
+    // HungerGame food portion = total reward minus the free-delivery portion
+    const hungerGameDiscount = hungerGameComponents > 0
+        ? hungerGameComponents
+        : Math.max(0, hungerGameTotal - hungerGameDeliveryDiscount);
+
+    const deliveryDiscount = roundTo2(
+        (order.deliveryDiscount ?? order.discount ?? 0) + hungerGameDeliveryDiscount
+    );
+
+    // Generic "food discount" line kept for backwards compatibility — the
+    // item-level discount is reported separately as itemDiscount.
+    const discount = 0;
+
     const deliveryFee = order.deliveryFee || 0;     // tax-exclusive
     const packagingFee = order.smallOrderSupportFee || 0;  // tax-exclusive
     const tip = order.tip || 0;
@@ -213,10 +250,14 @@ async function buildInvoiceData(orderId: string): Promise<InvoiceData> {
 
     const vendorName = order.vendorName || vendor.shopName || vendor.fullName || 'Restaurant';
 
+    const totalDiscount = roundTo2(
+        itemDiscount + discount + deliveryDiscount + hungerGameDiscount + coinDiscount + promoDiscount
+    );
+
     const invoiceData: InvoiceData = {
-        invoiceNumber,
+        invoiceNumber: formatInvoiceNumber(invoiceNumber),
         invoiceDate: formatDate(new Date()),
-        invoiceType: (vendor.gstin || PLATFORM.gstin) ? 'Tax Invoice' : 'Bill of Supply',
+        invoiceType: 'Tax Invoice',
         invoiceSubType: 'food',
         onBehalfOf: `Raised by ${PLATFORM.name} on behalf of ${vendorName}`,
 
@@ -246,6 +287,7 @@ async function buildInvoiceData(orderId: string): Promise<InvoiceData> {
 
         billSummary: {
             itemTotal: roundTo2(foodTaxableAmount),
+            itemDiscount: roundTo2(itemDiscount),
             discount: roundTo2(discount),
             deliveryDiscount: roundTo2(deliveryDiscount),
             hungerGameDiscount: roundTo2(hungerGameDiscount),
@@ -259,6 +301,7 @@ async function buildInvoiceData(orderId: string): Promise<InvoiceData> {
             sgst: billSgst,
             totalTax: roundTo2(billCgst + billSgst),
             roundOff,
+            totalDiscount,
             grandTotal: roundTo2(total),
         },
 
@@ -294,12 +337,8 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
         }
     }
 
-    // Stored GST values from the app (PricingCalculator uses 1-decimal rounding)
-    const storedGstOnFood = order.gstOnFood || 0;
-    const storedGstOnServices = order.gstOnServices || 0;
-
     const suffixMap = { food: 'F', delivery: 'D', platform: 'P' };
-    const invoiceNum = `${base.invoiceNumber}-${suffixMap[type]}`;
+    const invoiceNum = `${formatInvoiceNumber(base.invoiceNumber)}-${suffixMap[type]}`;
 
     if (type === 'food') {
         // Food invoice: only food items, on behalf of vendor
@@ -318,21 +357,31 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
         const foodBillSgst = roundTo2(storedFoodGst - foodBillCgst);
         const foodTotalTax = roundTo2(foodBillCgst + foodBillSgst);
         const foodGross = roundTo2(foodItemTotal + foodTotalTax);
-        
+        // Discounts that reduce what the customer pays for food
+        const foodOrderDiscounts = roundTo2(
+            base.billSummary.discount
+            + base.billSummary.hungerGameDiscount
+            + base.billSummary.coinDiscount
+            + base.billSummary.promoDiscount
+        );
+
+
         // Clone base and override specific sections
         const foodInvoice: InvoiceData = {
             ...base,
             invoiceNumber: invoiceNum,
             invoiceSubType: 'food',
-            invoiceType: 'Bill of Supply',
+            invoiceType: 'Tax Invoice',
             onBehalfOf: `Issued by ${base.vendor.name}`,
             items: base.items,
             taxSummary: base.taxSummary.filter(t => t.hsnCode === HSN_CODES.FOOD),
             billSummary: {
                 ...base.billSummary,
                 itemTotal: foodItemTotal,
+                itemDiscount: roundTo2(base.billSummary.itemDiscount),
                 discount: roundTo2(base.billSummary.discount),
-                deliveryDiscount: roundTo2(base.billSummary.deliveryDiscount),
+                // Delivery-side discounts don't belong on the food invoice
+                deliveryDiscount: 0,
                 hungerGameDiscount: roundTo2(base.billSummary.hungerGameDiscount),
                 deliveryFee: 0,
                 packagingFee: 0,
@@ -344,7 +393,10 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
                 sgst: foodBillSgst,
                 totalTax: foodTotalTax,
                 roundOff: 0,
-                grandTotal: roundTo2(foodGross - (base.billSummary.discount + base.billSummary.deliveryDiscount + base.billSummary.hungerGameDiscount + base.billSummary.coinDiscount + base.billSummary.promoDiscount)),
+                totalDiscount: roundTo2(
+                    base.billSummary.itemDiscount + foodOrderDiscounts
+                ),
+                grandTotal: roundTo2(Math.max(0, foodGross - foodOrderDiscounts)),
             },
         };
         return foodInvoice;
@@ -368,9 +420,15 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
         const dSgst = roundTo2(deliveryGstShare - dCgst);
         const dTotalTax = roundTo2(dCgst + dSgst);
         const tipAmount = base.billSummary.tip;
-        // Grand total = delivery fee + delivery GST + tip
-        const dGrand = roundTo2(deliveryTaxable + dTotalTax + tipAmount);
-        
+        // Delivery fee waivers (free-delivery offers / HungerGame level 2)
+        const dDiscount = Math.min(
+            roundTo2(base.billSummary.deliveryDiscount),
+            roundTo2(deliveryTaxable + dTotalTax)
+        );
+        // Grand total = delivery fee + delivery GST + tip - waiver
+        const dGrand = roundTo2(Math.max(0, deliveryTaxable + dTotalTax + tipAmount - dDiscount));
+
+
         const deliveryItems = deliveryTaxable > 0 ? [{
             slNo: 1,
             name: 'Delivery Charges',
@@ -390,7 +448,7 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
             ...base,
             invoiceNumber: invoiceNum,
             invoiceSubType: 'delivery',
-            invoiceType: 'Bill of Supply',
+            invoiceType: 'Tax Invoice',
             onBehalfOf: `Issued by ${dpName}`,
             vendor: {
                 name: dpName,
@@ -414,8 +472,9 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
             billSummary: {
                 ...base.billSummary,
                 itemTotal: roundTo2(deliveryTaxable),
+                itemDiscount: 0,
                 discount: 0,
-                deliveryDiscount: 0,
+                deliveryDiscount: dDiscount,
                 hungerGameDiscount: 0,
                 deliveryFee: 0, // It's an item now
                 packagingFee: 0,
@@ -427,9 +486,15 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
                 sgst: dSgst,
                 totalTax: dTotalTax,
                 roundOff: 0,
+                totalDiscount: dDiscount,
                 grandTotal: dGrand,
             },
         };
+
+        // NOTE: this return was missing — every delivery invoice request silently
+        // fell through to the platform-fee branch below, which is why delivery
+        // invoices could not be downloaded.
+        return deliveryInvoice;
     }
 
     // Platform fee invoice: by Delito itself
@@ -480,6 +545,7 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
         billSummary: {
             ...base.billSummary,
             itemTotal: roundTo2(pfTaxable),
+            itemDiscount: 0,
             discount: 0,
             deliveryDiscount: 0,
             hungerGameDiscount: 0,
@@ -493,6 +559,7 @@ async function buildTypedInvoice(orderId: string, type: 'food' | 'delivery' | 'p
             sgst: pfSgst,
             totalTax: pfTotalTax,
             roundOff: 0,
+            totalDiscount: 0,
             grandTotal: pfGrand,
         },
     };

@@ -14,6 +14,7 @@ import {
 import { useApi } from '@/hooks/useApi';
 
 interface RefundEntry {
+    invoiceNumber?: string;
     orderId: string;
     vendorId: string;
     vendorName: string;
@@ -166,16 +167,16 @@ export default function RefundReportPage() {
 
     const downloadCSV = () => {
         if (!data?.entries) return;
-        const headers = ['Order ID', 'Customer', 'Vendor', 'Order Date', 'Refund Date', 'Order Total', 'Refund Amount', 'Payment Mode', 'Cancelled By', 'Cancellation Reason', 'Refund Status'];
+        const headers = ['Invoice No.', 'Order ID', 'Customer', 'Vendor', 'Order Date', 'Refund Date', 'Order Total', 'Refund Amount', 'Payment Mode', 'Cancelled By', 'Cancellation Reason', 'Refund Status'];
         const rows = data.entries.map(e => [
-            e.orderId, e.customerName, e.vendorName,
+            e.invoiceNumber || '', e.orderId, e.customerName, e.vendorName,
             formatDate(e.orderDate), formatDate(e.refundDate),
             e.orderTotal.toFixed(2), e.refundAmount.toFixed(2),
             e.paymentMode, e.cancelledBy,
             `"${(e.cancellationReason || '').replace(/"/g, "'")}"`,
             e.refundStatus,
         ]);
-        const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const csvContent = '\ufeff' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

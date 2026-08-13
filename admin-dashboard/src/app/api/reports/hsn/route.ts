@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
+import { getInvoiceNumberMap } from '@/lib/invoice-lookup';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -53,6 +54,8 @@ export async function GET(request: Request) {
         toDate.setHours(23, 59, 59, 999);
 
         const allOrders = await cachedCollection(collections.orders, 30000);
+        const invoiceNumbers = await getInvoiceNumberMap();
+        const coveredInvoices: string[] = [];
 
         let foodTotalValue = 0, foodTotalQuantity = 0;
         let deliveryTotalValue = 0, deliveryCount = 0;
@@ -76,27 +79,39 @@ export async function GET(request: Request) {
 
             const platformFee = (order.smallOrderSupportFee || 0) as number;
             if (platformFee > 0) { platformFeeTotalValue += platformFee; platformFeeCount += 1; }
+
+            const invNo = invoiceNumbers[order.id];
+            if (invNo) coveredInvoices.push(invNo);
         });
+
+        coveredInvoices.sort();
+        const documentRange = {
+            from: coveredInvoices[0] || '',
+            to: coveredInvoices[coveredInvoices.length - 1] || '',
+            count: coveredInvoices.length,
+        };
 
         const hsnRows: HSNRow[] = [];
 
         if (foodTotalValue > 0) {
-            const taxable = roundTo2(foodTotalValue / 1.05);
+            // Item prices in this system are tax-EXCLUSIVE (see /api/invoices):
+            // the taxable value is the item total and GST is added on top.
+            const taxable = roundTo2(foodTotalValue);
             const cgst = roundTo2(taxable * 0.025);
             const sgst = roundTo2(taxable * 0.025);
-            hsnRows.push({ hsnCode: '9963', description: 'Restaurant & Food Services', uqc: 'NOS', totalQuantity: foodTotalQuantity, totalValue: roundTo2(foodTotalValue), taxableValue: taxable, cgstRate: 2.5, cgstAmount: cgst, sgstRate: 2.5, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
+            hsnRows.push({ hsnCode: '9963', description: 'Restaurant & Food Services', uqc: 'NOS', totalQuantity: foodTotalQuantity, totalValue: roundTo2(taxable + cgst + sgst), taxableValue: taxable, cgstRate: 2.5, cgstAmount: cgst, sgstRate: 2.5, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
         }
         if (deliveryTotalValue > 0) {
-            const taxable = roundTo2(deliveryTotalValue / 1.18);
+            const taxable = roundTo2(deliveryTotalValue);
             const cgst = roundTo2(taxable * 0.09);
             const sgst = roundTo2(taxable * 0.09);
-            hsnRows.push({ hsnCode: '996812', description: 'Courier & Delivery Services', uqc: 'NOS', totalQuantity: deliveryCount, totalValue: roundTo2(deliveryTotalValue), taxableValue: taxable, cgstRate: 9, cgstAmount: cgst, sgstRate: 9, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
+            hsnRows.push({ hsnCode: '996812', description: 'Courier & Delivery Services', uqc: 'NOS', totalQuantity: deliveryCount, totalValue: roundTo2(taxable + cgst + sgst), taxableValue: taxable, cgstRate: 9, cgstAmount: cgst, sgstRate: 9, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
         }
         if (platformFeeTotalValue > 0) {
-            const taxable = roundTo2(platformFeeTotalValue / 1.18);
+            const taxable = roundTo2(platformFeeTotalValue);
             const cgst = roundTo2(taxable * 0.09);
             const sgst = roundTo2(taxable * 0.09);
-            hsnRows.push({ hsnCode: '998599', description: 'Platform / Packing Fee', uqc: 'NOS', totalQuantity: platformFeeCount, totalValue: roundTo2(platformFeeTotalValue), taxableValue: taxable, cgstRate: 9, cgstAmount: cgst, sgstRate: 9, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
+            hsnRows.push({ hsnCode: '998599', description: 'Platform / Packing Fee', uqc: 'NOS', totalQuantity: platformFeeCount, totalValue: roundTo2(taxable + cgst + sgst), taxableValue: taxable, cgstRate: 9, cgstAmount: cgst, sgstRate: 9, sgstAmount: sgst, igstRate: 0, igstAmount: 0, totalTax: roundTo2(cgst + sgst), cessAmount: 0 });
         }
 
         const totals = {
@@ -111,7 +126,7 @@ export async function GET(request: Request) {
 
         if (format === 'csv') {
             const bom = '\uFEFF';
-            const csv = generateHSNCSV(hsnRows, totals, fromDate, toDate);
+            const csv = generateHSNCSV(hsnRows, totals, fromDate, toDate, documentRange);
             return new Response(bom + csv, {
                 headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="HSN_Summary_${fromDate.toISOString().slice(0, 10)}_${toDate.toISOString().slice(0, 10)}.csv"` },
             });
@@ -124,17 +139,18 @@ export async function GET(request: Request) {
             });
         }
 
-        return NextResponse.json({ success: true, data: { from: fromDate.toISOString(), to: toDate.toISOString(), hsnRows, totals } });
+        return NextResponse.json({ success: true, data: { from: fromDate.toISOString(), to: toDate.toISOString(), hsnRows, totals, documentRange } });
     } catch (error: any) {
         console.error('HSN summary error:', error);
         return NextResponse.json({ success: false, error: error?.message || 'Failed to generate HSN summary' }, { status: 500 });
     }
 }
 
-function generateHSNCSV(rows: HSNRow[], totals: any, from: Date, to: Date): string {
+function generateHSNCSV(rows: HSNRow[], totals: any, from: Date, to: Date, docs?: { from: string; to: string; count: number }): string {
     const lines: string[] = [];
-    lines.push(`"HSN Summary Report (for GSTR-1 Filing)"`);
+    lines.push(`"HSN Summary Report (for GSTR-1 Table 12)"`);
     lines.push(`"Period: ${fmtDate(from)} to ${fmtDate(to)}"`);
+    lines.push(`"Invoices covered: ${docs?.count || 0}${docs?.from ? ` (${docs.from} to ${docs.to})` : ''}"`);
     lines.push(`"Generated: ${fmtDate(new Date())}"`);
     lines.push('');
     lines.push('"HSN Code","Description","UQC","Total Qty","Total Value (₹)","Taxable Value (₹)","CGST Rate","CGST Amount (₹)","SGST Rate","SGST Amount (₹)","IGST Rate","IGST Amount (₹)","Total Tax (₹)","Cess (₹)"');

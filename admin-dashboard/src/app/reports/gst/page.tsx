@@ -4,82 +4,169 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Receipt, RefreshCw, Download, IndianRupee,
-    Calendar, Store, TrendingUp, Loader2,
-    FileText, ChevronDown, Filter, Percent
+    Store, TrendingUp, Loader2, FileSpreadsheet,
+    ChevronDown, Filter, Percent, ShieldCheck, Info,
 } from 'lucide-react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-    ResponsiveContainer, Legend, PieChart, Pie, Cell
+    ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts';
 import { useApi } from '@/hooks/useApi';
 
+// ─── Types (mirror /api/reports/gst) ───
+
 interface GSTEntry {
+    invoiceNumber: string;
     orderId: string;
     vendorId: string;
     vendorName: string;
     orderDate: string;
-    itemTotal: number;
-    discount: number;
-    itemTotalAfterDiscount: number;
-    deliveryFee: number;
+    placeOfSupply: string;
+    grossItemTotal: number;
+    itemDiscount: number;
+    postSupplyDiscount: number;
+    totalDiscount: number;
+    foodTaxable: number;
+    deliveryTaxable: number;
+    platformTaxable: number;
+    commissionTaxable: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    totalGst: number;
+    invoiceValue: number;
     commission: number;
     gstOnCommission: number;
-    gstOnFood: number;
-    gstOnDelivery: number;
-    totalGst: number;
     totalPlatformEarning: number;
     paymentMode: string;
 }
 
-interface MonthlyGST {
+interface PeriodRow {
     month: string;
     monthKey: string;
     ordersCount: number;
-    totalItemSales: number;
-    totalDeliveryFees: number;
-    totalCommission: number;
-    totalGstOnCommission: number;
-    totalGstOnFood: number;
-    totalGstOnDelivery: number;
+    grossSales: number;
+    totalDiscount: number;
+    foodTaxable: number;
+    deliveryTaxable: number;
+    platformTaxable: number;
+    commissionTaxable: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
     totalGst: number;
+    invoiceValue: number;
+    totalCommission: number;
     totalPlatformEarning: number;
-    totalPlatformEarningExclGst: number;
 }
 
-interface VendorGST {
+interface VendorRow {
     vendorId: string;
     vendorName: string;
+    gstin: string;
     ordersCount: number;
-    totalItemSales: number;
-    totalDeliveryFees: number;
-    totalCommission: number;
+    grossSales: number;
+    totalDiscount: number;
+    foodTaxable: number;
+    deliveryTaxable: number;
+    commissionTaxable: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
     totalGst: number;
-    totalPlatformEarning: number;
-    totalPlatformEarningExclGst: number;
+}
+
+interface B2CSRow {
+    rate: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    invoiceCount: number;
+}
+
+interface HSNRow {
+    hsn: string;
+    description: string;
+    uqc: string;
+    quantity: number;
+    rate: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    total: number;
 }
 
 interface GSTReportData {
-    entries: GSTEntry[];
-    monthlyData: MonthlyGST[];
-    vendorData: VendorGST[];
+    meta: {
+        legalName: string;
+        tradeName: string;
+        gstin: string;
+        address: string;
+        placeOfSupply: string;
+        periodFrom: string;
+        periodTo: string;
+        generatedAt: string;
+        basisOfPreparation: string;
+    };
     summary: {
         totalOrders: number;
-        totalItemSales: number;
-        totalDeliveryFees: number;
+        grossSales: number;
+        totalItemDiscount: number;
+        totalPostSupplyDiscount: number;
+        totalDiscount: number;
+        foodTaxable: number;
+        deliveryTaxable: number;
+        platformTaxable: number;
+        commissionTaxable: number;
+        totalTaxableValue: number;
+        totalCgst: number;
+        totalSgst: number;
+        totalIgst: number;
+        totalGstCollected: number;
+        totalInvoiceValue: number;
         totalCommission: number;
         totalGstOnCommission: number;
-        totalGstOnFood: number;
-        totalGstOnDelivery: number;
-        totalGstCollected: number;
         totalPlatformEarning: number;
         totalPlatformEarningExclGst: number;
+        totalGstOnFood: number;
+        totalGstOnDelivery: number;
+        totalGstOnPlatformFee: number;
         commissionRate: number;
-        gstOnCommissionRate: number;
-        gstOnFoodRate: number;
-        gstOnDeliveryRate: number;
-        gstRate: number;
     };
+    b2cs: B2CSRow[];
+    hsnSummary: HSNRow[];
+    documentSummary: {
+        natureOfDocument: string;
+        from: string;
+        to: string;
+        totalIssued: number;
+        cancelled: number;
+        net: number;
+    };
+    gstr3b: {
+        outwardTaxableSupplies: { label: string; taxableValue: number; igst: number; cgst: number; sgst: number; cess: number };
+        supplies95: { label: string; taxableValue: number; igst: number; cgst: number; sgst: number; cess: number };
+        netTaxPayable: number;
+    };
+    monthlyData: PeriodRow[];
+    vendorData: VendorRow[];
+    entries: GSTEntry[];
+    entriesTruncated: boolean;
 }
+
+const COLORS = ['#F4511E', '#FF9904', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#6366F1', '#EC4899'];
+
+const tooltipStyle = {
+    backgroundColor: 'var(--surface)',
+    border: '1px solid var(--border)',
+    borderRadius: '12px',
+    boxShadow: 'var(--shadow-md)',
+    fontSize: '0.8125rem',
+    padding: '10px 14px',
+};
 
 function StatCard({ title, value, subtitle, icon: Icon, color = 'primary' }: {
     title: string; value: string | number; subtitle?: string;
@@ -98,13 +185,13 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'primary' }: {
             className="glass-card"
             style={{ padding: 16 }}
         >
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                <div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
                     <p style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{title}</p>
-                    <p style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--foreground)' }}>{value}</p>
-                    {subtitle && <p style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>{subtitle}</p>}
+                    <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--foreground)', wordBreak: 'break-word' }}>{value}</p>
+                    {subtitle && <p style={{ fontSize: '0.68rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>{subtitle}</p>}
                 </div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: colorMap[color].bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: colorMap[color].bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Icon size={18} color={colorMap[color].text} />
                 </div>
             </div>
@@ -112,16 +199,16 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'primary' }: {
     );
 }
 
-const COLORS = ['#F4511E', '#FF9904', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#6366F1', '#EC4899'];
+type TabKey = 'overview' | 'gstr1' | 'gstr3b' | 'periods' | 'vendors' | 'register';
 
-const tooltipStyle = {
-    backgroundColor: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '12px',
-    boxShadow: 'var(--shadow-md)',
-    fontSize: '0.8125rem',
-    padding: '10px 14px',
-};
+const TABS: { key: TabKey; label: string; short: string }[] = [
+    { key: 'overview', label: 'Overview', short: 'Overview' },
+    { key: 'gstr1', label: 'GSTR-1', short: 'GSTR-1' },
+    { key: 'gstr3b', label: 'GSTR-3B', short: 'GSTR-3B' },
+    { key: 'periods', label: 'Tax Periods', short: 'Periods' },
+    { key: 'vendors', label: 'By Restaurant', short: 'Restaurants' },
+    { key: 'register', label: 'Invoice Register', short: 'Register' },
+];
 
 export default function GSTReportPage() {
     const [startDate, setStartDate] = useState('');
@@ -129,19 +216,19 @@ export default function GSTReportPage() {
     const [appliedStart, setAppliedStart] = useState('');
     const [appliedEnd, setAppliedEnd] = useState('');
     const [showDateFilter, setShowDateFilter] = useState(false);
+    const [showExportMenu, setShowExportMenu] = useState(false);
 
-    const buildEndpoint = (s: string, e: string) => {
+    const buildQuery = (s: string, e: string) => {
         const params = new URLSearchParams();
         if (s) params.set('startDate', s);
         if (e) params.set('endDate', e);
-        const q = params.toString();
-        return `/api/reports/gst${q ? '?' + q : ''}`;
+        return params.toString();
     };
 
-    const [endpoint, setEndpoint] = useState(() => buildEndpoint('', ''));
+    const [endpoint, setEndpoint] = useState('/api/reports/gst');
     const { data, loading, refetch } = useApi<GSTReportData>(endpoint);
     const [refreshing, setRefreshing] = useState(false);
-    const [activeTab, setActiveTab] = useState<'summary' | 'monthly' | 'vendor' | 'transactions'>('summary');
+    const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
     const handleRefresh = async () => {
         setRefreshing(true);
@@ -152,413 +239,481 @@ export default function GSTReportPage() {
     const applyFilter = () => {
         setAppliedStart(startDate);
         setAppliedEnd(endDate);
-        setEndpoint(buildEndpoint(startDate, endDate));
+        const q = buildQuery(startDate, endDate);
+        setEndpoint(`/api/reports/gst${q ? '?' + q : ''}`);
         setShowDateFilter(false);
     };
 
     const clearFilter = () => {
-        setStartDate('');
-        setEndDate('');
-        setAppliedStart('');
-        setAppliedEnd('');
-        setEndpoint(buildEndpoint('', ''));
+        setStartDate(''); setEndDate('');
+        setAppliedStart(''); setAppliedEnd('');
+        setEndpoint('/api/reports/gst');
         setShowDateFilter(false);
     };
 
     const isFiltered = !!(appliedStart || appliedEnd);
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 1 }).format(amount);
+    const exportSection = (section: string) => {
+        const params = new URLSearchParams();
+        if (appliedStart) params.set('startDate', appliedStart);
+        if (appliedEnd) params.set('endDate', appliedEnd);
+        params.set('format', 'csv');
+        params.set('section', section);
+        window.open(`/api/reports/gst?${params.toString()}`, '_blank');
+        setShowExportMenu(false);
     };
 
-    const formatDate = (dateStr: string) => {
-        return new Date(dateStr).toLocaleDateString('en-IN', {
-            day: '2-digit', month: 'short', year: 'numeric'
-        });
-    };
+    const inr = (amount: number) =>
+        new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
+
+    const num = (amount: number) => (amount || 0).toFixed(2);
+
+    const formatDate = (dateStr: string) =>
+        new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
     const chartData = useMemo(() => {
         if (!data?.monthlyData) return [];
         return data.monthlyData.slice(0, 12).reverse().map(m => ({
             name: m.month.split(' ')[0].slice(0, 3),
-            commission: Math.round(m.totalCommission),
+            taxable: Math.round(m.taxableValue),
             gst: Math.round(m.totalGst),
-            total: Math.round(m.totalPlatformEarning),
         }));
     }, [data]);
 
-    const vendorPieData = useMemo(() => {
-        if (!data?.vendorData) return [];
-        return data.vendorData.slice(0, 8).map(v => ({
-            name: v.vendorName.length > 15 ? v.vendorName.slice(0, 15) + '...' : v.vendorName,
-            value: Math.round(v.totalGst),
-        }));
+    const ratePieData = useMemo(() => {
+        if (!data?.summary) return [];
+        return [
+            { name: 'Food (5%)', value: Math.round(data.summary.foodTaxable) },
+            { name: 'Delivery (18%)', value: Math.round(data.summary.deliveryTaxable) },
+            { name: 'Platform fee (18%)', value: Math.round(data.summary.platformTaxable) },
+            { name: 'Commission (18%)', value: Math.round(data.summary.commissionTaxable) },
+        ].filter(d => d.value > 0);
     }, [data]);
-
-    const downloadCSV = () => {
-        if (!data?.entries) return;
-
-        const headers = [
-            'Order ID',
-            'Vendor',
-            'Date',
-            'Item Total',
-            'Discount',
-            'Taxable Value',
-            'Delivery Fee',
-            'Commission (15%)',
-            'GST on Food (5%)',
-            'GST on Delivery (18%)',
-            'GST on Commission (18%)',
-            'Total GST',
-            'Platform Earning',
-            'Payment Mode'
-        ];
-        const rows = data.entries.map(e => [
-            e.orderId,
-            e.vendorName,
-            formatDate(e.orderDate),
-            e.itemTotal.toFixed(2),
-            (e.discount || 0).toFixed(2),
-            e.itemTotalAfterDiscount.toFixed(2),
-            (e.deliveryFee || 0).toFixed(2),
-            e.commission.toFixed(2),
-            (e.gstOnFood || 0).toFixed(2),
-            (e.gstOnDelivery || 0).toFixed(2),
-            e.gstOnCommission.toFixed(2),
-            e.totalGst.toFixed(2),
-            e.totalPlatformEarning.toFixed(2),
-            e.paymentMode,
-        ]);
-
-        const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `gst-report-${new Date().toISOString().split('T')[0]}.csv`;
-        a.click();
-    };
 
     if (loading) {
         return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: 20 }}>
-                <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>GST Report</h1>
+            <div className="page-container">
+                <h1 className="page-title"><Receipt size={26} style={{ color: 'var(--primary)' }} /> GST Report</h1>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-                    <Loader2 className="w-10 h-10 animate-spin" style={{ color: 'var(--primary)' }} />
+                    <Loader2 className="animate-spin" size={40} style={{ color: 'var(--primary)' }} />
                 </div>
             </div>
         );
     }
+
+    const meta = data?.meta;
+    const s = data?.summary;
 
     return (
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: 20 }}
+            className="page-container"
         >
-            {/* Header */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            {/* ─── Header ─── */}
+            <div className="page-header">
                 <div>
-                    <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>
-                        <Receipt size={28} style={{ marginRight: 10, verticalAlign: 'middle', color: 'var(--primary)' }} />
+                    <h1 className="page-title">
+                        <Receipt size={26} style={{ color: 'var(--primary)' }} />
                         GST Report
                     </h1>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>
-                        GST: 5% on Food, 18% on Delivery & Commission
+                    <p className="page-subtitle">
+                        GSTR-1 / GSTR-3B ready · Food 5% · Delivery, platform fee &amp; commission 18%
                     </p>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {/* Date Filter */}
+                <div className="page-header-actions">
+                    {/* Tax period filter */}
                     <div style={{ position: 'relative' }}>
                         <button
-                            onClick={() => setShowDateFilter(v => !v)}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                padding: '8px 16px', borderRadius: 10,
-                                background: isFiltered ? 'rgba(244,81,30,0.12)' : 'var(--surface)',
-                                color: isFiltered ? 'var(--primary)' : 'var(--foreground)',
-                                border: `1px solid ${isFiltered ? 'var(--primary)' : 'var(--border)'}`,
-                                cursor: 'pointer', fontWeight: 500, fontSize: '0.875rem'
-                            }}
+                            onClick={() => { setShowDateFilter(v => !v); setShowExportMenu(false); }}
+                            className="btn btn-outline"
+                            style={isFiltered ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : undefined}
                         >
                             <Filter size={16} />
-                            {isFiltered
-                                ? `${appliedStart || 'Start'} → ${appliedEnd || 'End'}`
-                                : 'Date Filter'}
+                            {isFiltered ? `${appliedStart || 'Start'} → ${appliedEnd || 'End'}` : 'Tax Period'}
                             <ChevronDown size={14} />
                         </button>
                         {showDateFilter && (
-                            <div style={{
-                                position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50,
-                                background: 'var(--surface)', border: '1px solid var(--border)',
-                                borderRadius: 12, padding: 16, boxShadow: 'var(--shadow-md)',
-                                minWidth: 280, display: 'flex', flexDirection: 'column', gap: 12
-                            }}>
-                                <p style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>Filter by Date Range</p>
+                            <div className="dropdown-panel">
+                                <p style={{ fontWeight: 600, fontSize: '0.85rem', margin: 0 }}>Select tax period</p>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-secondary)' }}>Start Date</label>
-                                    <input
-                                        type="date"
-                                        value={startDate}
-                                        onChange={e => setStartDate(e.target.value)}
-                                        style={{
-                                            padding: '7px 10px', borderRadius: 8, fontSize: '0.85rem',
-                                            border: '1px solid var(--border)', background: 'var(--background)',
-                                            color: 'var(--foreground)', outline: 'none'
-                                        }}
-                                    />
+                                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-secondary)' }}>From</label>
+                                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-control" />
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-secondary)' }}>End Date</label>
-                                    <input
-                                        type="date"
-                                        value={endDate}
-                                        onChange={e => setEndDate(e.target.value)}
-                                        style={{
-                                            padding: '7px 10px', borderRadius: 8, fontSize: '0.85rem',
-                                            border: '1px solid var(--border)', background: 'var(--background)',
-                                            color: 'var(--foreground)', outline: 'none'
-                                        }}
-                                    />
+                                    <label style={{ fontSize: '0.75rem', color: 'var(--foreground-secondary)' }}>To</label>
+                                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input-control" />
                                 </div>
-                                {/* Quick Presets */}
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                     {[
-                                        { label: 'This Month', fn: () => { const n = new Date(); const s = new Date(n.getFullYear(), n.getMonth(), 1); setStartDate(s.toISOString().split('T')[0]); setEndDate(n.toISOString().split('T')[0]); } },
-                                        { label: 'Last Month', fn: () => { const n = new Date(); const s = new Date(n.getFullYear(), n.getMonth() - 1, 1); const e = new Date(n.getFullYear(), n.getMonth(), 0); setStartDate(s.toISOString().split('T')[0]); setEndDate(e.toISOString().split('T')[0]); } },
-                                        { label: 'Last 3M', fn: () => { const n = new Date(); const s = new Date(n); s.setMonth(s.getMonth() - 3); setStartDate(s.toISOString().split('T')[0]); setEndDate(n.toISOString().split('T')[0]); } },
-                                        { label: 'This Year', fn: () => { const n = new Date(); setStartDate(`${n.getFullYear()}-01-01`); setEndDate(n.toISOString().split('T')[0]); } },
+                                        { label: 'This Month', fn: () => { const n = new Date(); const st = new Date(n.getFullYear(), n.getMonth(), 1); setStartDate(st.toISOString().split('T')[0]); setEndDate(n.toISOString().split('T')[0]); } },
+                                        { label: 'Last Month', fn: () => { const n = new Date(); const st = new Date(n.getFullYear(), n.getMonth() - 1, 1); const en = new Date(n.getFullYear(), n.getMonth(), 0); setStartDate(st.toISOString().split('T')[0]); setEndDate(en.toISOString().split('T')[0]); } },
+                                        { label: 'This Quarter', fn: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3); const st = new Date(n.getFullYear(), q * 3, 1); setStartDate(st.toISOString().split('T')[0]); setEndDate(n.toISOString().split('T')[0]); } },
+                                        { label: 'FY to date', fn: () => { const n = new Date(); const fyStart = n.getMonth() >= 3 ? new Date(n.getFullYear(), 3, 1) : new Date(n.getFullYear() - 1, 3, 1); setStartDate(fyStart.toISOString().split('T')[0]); setEndDate(n.toISOString().split('T')[0]); } },
                                     ].map(p => (
-                                        <button key={p.label} onClick={p.fn} style={{
-                                            padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem',
-                                            background: 'rgba(244,81,30,0.08)', color: 'var(--primary)',
-                                            border: '1px solid rgba(244,81,30,0.2)', cursor: 'pointer', fontWeight: 500
-                                        }}>{p.label}</button>
+                                        <button key={p.label} onClick={p.fn} className="chip-button">{p.label}</button>
                                     ))}
                                 </div>
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                    <button onClick={clearFilter} style={{
-                                        flex: 1, padding: '8px', borderRadius: 8, fontSize: '0.85rem',
-                                        background: 'var(--background)', border: '1px solid var(--border)',
-                                        color: 'var(--foreground)', cursor: 'pointer', fontWeight: 500
-                                    }}>Clear</button>
-                                    <button onClick={applyFilter} style={{
-                                        flex: 1, padding: '8px', borderRadius: 8, fontSize: '0.85rem',
-                                        background: 'var(--primary)', border: 'none',
-                                        color: 'white', cursor: 'pointer', fontWeight: 600
-                                    }}>Apply</button>
+                                    <button onClick={clearFilter} className="btn btn-outline" style={{ flex: 1, justifyContent: 'center' }}>Clear</button>
+                                    <button onClick={applyFilter} className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>Apply</button>
                                 </div>
                             </div>
                         )}
                     </div>
-                    <button
-                        onClick={downloadCSV}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: 6,
-                            padding: '8px 16px', borderRadius: 10,
-                            background: 'var(--surface)', color: 'var(--foreground)',
-                            border: '1px solid var(--border)', cursor: 'pointer',
-                            fontWeight: 500, fontSize: '0.875rem'
-                        }}
-                    >
-                        <Download size={16} /> Export CSV
-                    </button>
-                    <button
-                        onClick={handleRefresh}
-                        disabled={refreshing}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: 6,
-                            padding: '8px 16px', borderRadius: 10,
-                            background: 'var(--primary)', color: 'white',
-                            border: 'none', cursor: refreshing ? 'not-allowed' : 'pointer',
-                            opacity: refreshing ? 0.6 : 1, fontWeight: 500, fontSize: '0.875rem'
-                        }}
-                    >
+
+                    {/* Export menu */}
+                    <div style={{ position: 'relative' }}>
+                        <button onClick={() => { setShowExportMenu(v => !v); setShowDateFilter(false); }} className="btn btn-outline">
+                            <Download size={16} /> Export <ChevronDown size={14} />
+                        </button>
+                        {showExportMenu && (
+                            <div className="dropdown-panel" style={{ minWidth: 240, gap: 2, padding: 6 }}>
+                                {[
+                                    { key: 'register', label: 'Invoice register (all columns)' },
+                                    { key: 'b2cs', label: 'GSTR-1 Table 7 — B2C (Others)' },
+                                    { key: 'hsn', label: 'GSTR-1 Table 12 — HSN summary' },
+                                    { key: 'monthly', label: 'Tax period summary' },
+                                    { key: 'vendor', label: 'Restaurant-wise summary' },
+                                ].map(opt => (
+                                    <button key={opt.key} onClick={() => exportSection(opt.key)} className="dropdown-item">
+                                        <FileSpreadsheet size={14} /> {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <button onClick={handleRefresh} disabled={refreshing} className="btn btn-primary">
                         <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                        {refreshing ? 'Refreshing…' : 'Refresh'}
                     </button>
                 </div>
             </div>
 
-            {/* Summary Cards - Row 1 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-                <StatCard
-                    title="Total GST Collected"
-                    value={formatCurrency(data?.summary.totalGstCollected || 0)}
-                    subtitle="All GST combined"
-                    icon={Receipt}
-                    color="primary"
-                />
-                <StatCard
-                    title="GST on Food (5%)"
-                    value={formatCurrency(data?.summary.totalGstOnFood || 0)}
-                    subtitle="On item total after discount"
-                    icon={IndianRupee}
-                    color="success"
-                />
-                <StatCard
-                    title="GST on Delivery (18%)"
-                    value={formatCurrency(data?.summary.totalGstOnDelivery || 0)}
-                    subtitle="On delivery fee"
-                    icon={IndianRupee}
-                    color="warning"
-                />
-                <StatCard
-                    title="GST on Commission (18%)"
-                    value={formatCurrency(data?.summary.totalGstOnCommission || 0)}
-                    subtitle="On 15% commission"
-                    icon={Percent}
-                    color="error"
-                />
+            {/* ─── Return header (identification block) ─── */}
+            {meta && (
+                <div className="glass-card gst-meta-grid" style={{ padding: 16, marginBottom: 16 }}>
+                    <div>
+                        <p className="gst-meta-label">Legal name</p>
+                        <p className="gst-meta-value">{meta.legalName}</p>
+                    </div>
+                    <div>
+                        <p className="gst-meta-label">GSTIN</p>
+                        <p className="gst-meta-value" style={{ fontFamily: 'monospace' }}>{meta.gstin}</p>
+                    </div>
+                    <div>
+                        <p className="gst-meta-label">Place of supply</p>
+                        <p className="gst-meta-value">{meta.placeOfSupply}</p>
+                    </div>
+                    <div>
+                        <p className="gst-meta-label">Tax period</p>
+                        <p className="gst-meta-value">
+                            {meta.periodFrom ? formatDate(meta.periodFrom) : '—'} → {meta.periodTo ? formatDate(meta.periodTo) : '—'}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="gst-meta-label">Invoices</p>
+                        <p className="gst-meta-value">{data?.documentSummary.totalIssued ?? 0} issued · {data?.documentSummary.cancelled ?? 0} cancelled</p>
+                    </div>
+                    <div>
+                        <p className="gst-meta-label">Generated</p>
+                        <p className="gst-meta-value">{new Date(meta.generatedAt).toLocaleString('en-IN')}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Control totals ─── */}
+            <div className="stat-grid" style={{ marginBottom: 16 }}>
+                <StatCard title="Total Taxable Value" value={inr(s?.totalTaxableValue || 0)} subtitle={`${s?.totalOrders || 0} invoices`} icon={Receipt} color="primary" />
+                <StatCard title="CGST" value={inr(s?.totalCgst || 0)} subtitle="Central GST payable" icon={IndianRupee} color="success" />
+                <StatCard title="SGST" value={inr(s?.totalSgst || 0)} subtitle="State GST payable" icon={IndianRupee} color="warning" />
+                <StatCard title="Total GST" value={inr(s?.totalGstCollected || 0)} subtitle="CGST + SGST + IGST" icon={ShieldCheck} color="error" />
             </div>
 
-            {/* Summary Cards - Row 2 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-                <StatCard
-                    title="Total Commission"
-                    value={formatCurrency(data?.summary.totalCommission || 0)}
-                    subtitle={`${data?.summary.commissionRate || 15}% of sales`}
-                    icon={Percent}
-                    color="success"
-                />
-                <StatCard
-                    title="Platform Earning (excl. GST)"
-                    value={formatCurrency(data?.summary.totalPlatformEarningExclGst || data?.summary.totalCommission || 0)}
-                    subtitle="Commission only — actual revenue"
-                    icon={TrendingUp}
-                    color="success"
-                />
-                <StatCard
-                    title="Platform Earning (incl. GST)"
-                    value={formatCurrency(data?.summary.totalPlatformEarning || 0)}
-                    subtitle="Commission + GST on Commission"
-                    icon={TrendingUp}
-                    color="warning"
-                />
-                <StatCard
-                    title="Total Item Sales"
-                    value={formatCurrency(data?.summary.totalItemSales || 0)}
-                    subtitle={`${data?.summary.totalOrders || 0} orders`}
-                    icon={IndianRupee}
-                    color="primary"
-                />
-                <StatCard
-                    title="Total Delivery Fees"
-                    value={formatCurrency(data?.summary.totalDeliveryFees || 0)}
-                    subtitle="Collected from customers"
-                    icon={IndianRupee}
-                    color="primary"
-                />
+            <div className="stat-grid" style={{ marginBottom: 16 }}>
+                <StatCard title="Gross Sales" value={inr(s?.grossSales || 0)} subtitle="Before any discount" icon={TrendingUp} color="primary" />
+                <StatCard title="Invoice Discounts" value={inr(s?.totalItemDiscount || 0)} subtitle="Reduce taxable value" icon={Percent} color="success" />
+                <StatCard title="Post-supply Discounts" value={inr(s?.totalPostSupplyDiscount || 0)} subtitle="Coins, promo, HungerGame" icon={Percent} color="warning" />
+                <StatCard title="Invoice Value" value={inr(s?.totalInvoiceValue || 0)} subtitle="Taxable value + GST" icon={IndianRupee} color="primary" />
+                <StatCard title="Commission Income" value={inr(s?.totalCommission || 0)} subtitle={`${s?.commissionRate || 15}% of sales, excl. GST`} icon={Percent} color="success" />
             </div>
 
-            {/* Tabs */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ overflow: 'hidden' }}>
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-                    {(['summary', 'monthly', 'vendor', 'transactions'] as const).map(t => (
+            {/* ─── Tabs ─── */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ overflow: 'hidden', padding: 0 }}>
+                <div className="tab-bar">
+                    {TABS.map(t => (
                         <button
-                            key={t}
-                            onClick={() => setActiveTab(t)}
-                            style={{
-                                flex: 1, padding: '14px 16px', fontSize: '0.85rem', fontWeight: 500,
-                                background: 'transparent', border: 'none', cursor: 'pointer',
-                                borderBottom: `2px solid ${activeTab === t ? 'var(--primary)' : 'transparent'}`,
-                                color: activeTab === t ? 'var(--primary)' : 'var(--foreground-secondary)',
-                                transition: 'all 0.2s'
-                            }}
+                            key={t.key}
+                            onClick={() => setActiveTab(t.key)}
+                            className={`tab-button ${activeTab === t.key ? 'active' : ''}`}
                         >
-                            {t === 'summary' && 'Overview'}
-                            {t === 'monthly' && 'Monthly Breakdown'}
-                            {t === 'vendor' && 'By Vendor'}
-                            {t === 'transactions' && 'Transactions'}
+                            {t.label}
                         </button>
                     ))}
                 </div>
 
-                <div style={{ padding: 20 }}>
-                    {/* Summary Tab */}
-                    {activeTab === 'summary' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
-                            {/* Bar Chart */}
-                            <div>
-                                <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>Monthly Commission & GST</h3>
-                                <ResponsiveContainer width="100%" height={280}>
+                <div style={{ padding: 16 }}>
+                    {/* ── Overview ── */}
+                    {activeTab === 'overview' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+                            <div style={{ minWidth: 0 }}>
+                                <h3 className="section-heading">Taxable value &amp; GST by tax period</h3>
+                                <ResponsiveContainer width="100%" height={260}>
                                     <BarChart data={chartData}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                        <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `₹${v}`} />
+                                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `₹${v}`} width={56} />
                                         <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`₹${value}`, '']} />
-                                        <Legend />
-                                        <Bar dataKey="commission" name="Commission" fill="#10B981" radius={[4, 4, 0, 0]} />
+                                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                                        <Bar dataKey="taxable" name="Taxable value" fill="#10B981" radius={[4, 4, 0, 0]} />
                                         <Bar dataKey="gst" name="GST" fill="#F4511E" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
 
-                            {/* Pie Chart */}
-                            <div>
-                                <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>GST by Vendor (Top 8)</h3>
-                                <ResponsiveContainer width="100%" height={280}>
+                            <div style={{ minWidth: 0 }}>
+                                <h3 className="section-heading">Taxable value by supply type</h3>
+                                <ResponsiveContainer width="100%" height={260}>
                                     <PieChart>
-                                        <Pie
-                                            data={vendorPieData}
-                                            dataKey="value"
-                                            nameKey="name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={80}
-                                            label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                                        >
-                                            {vendorPieData.map((_, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
+                                        <Pie data={ratePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}>
+                                            {ratePieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                                         </Pie>
-                                        <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`₹${value}`, 'GST']} />
+                                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                                        <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`₹${value}`, 'Taxable value']} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
 
-                            {/* Rate Info */}
                             <div style={{ gridColumn: '1 / -1' }}>
-                                <div style={{ padding: 16, background: 'rgba(244, 81, 30, 0.08)', borderRadius: 12 }}>
-                                    <h4 style={{ fontWeight: 600, marginBottom: 8 }}>GST Calculation Formula</h4>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, fontSize: '0.85rem' }}>
-                                        <div>
-                                            <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>Platform Commission</p>
-                                            <p style={{ fontWeight: 600 }}>15% of Item Total</p>
-                                        </div>
-                                        <div>
-                                            <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>GST on Commission</p>
-                                            <p style={{ fontWeight: 600 }}>18% of Commission</p>
-                                        </div>
-                                        <div>
-                                            <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>Effective GST Rate on Sales</p>
-                                            <p style={{ fontWeight: 600 }}>2.7%</p>
-                                        </div>
-                                        <div>
-                                            <p style={{ color: 'var(--foreground-secondary)', marginBottom: 4 }}>Vendor Payout</p>
-                                            <p style={{ fontWeight: 600 }}>Item Total - Commission - GST</p>
-                                        </div>
-                                    </div>
+                                <h3 className="section-heading">Rate-wise reconciliation</h3>
+                                <div className="table-scroll">
+                                    <table className="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Supply</th>
+                                                <th>HSN / SAC</th>
+                                                <th style={{ textAlign: 'right' }}>Rate</th>
+                                                <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                                <th style={{ textAlign: 'right' }}>CGST</th>
+                                                <th style={{ textAlign: 'right' }}>SGST</th>
+                                                <th style={{ textAlign: 'right' }}>Total Tax</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {[
+                                                { label: 'Restaurant service (food)', hsn: '9963', rate: 5, taxable: s?.foodTaxable || 0 },
+                                                { label: 'Delivery charges', hsn: '996812', rate: 18, taxable: s?.deliveryTaxable || 0 },
+                                                { label: 'Platform / convenience fee', hsn: '998599', rate: 18, taxable: s?.platformTaxable || 0 },
+                                                { label: 'Commission on restaurant sales', hsn: '998399', rate: 18, taxable: s?.commissionTaxable || 0 },
+                                            ].map(row => {
+                                                const tax = row.taxable * row.rate / 100;
+                                                return (
+                                                    <tr key={row.label}>
+                                                        <td style={{ fontWeight: 500 }}>{row.label}</td>
+                                                        <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{row.hsn}</td>
+                                                        <td style={{ textAlign: 'right' }}>{row.rate}%</td>
+                                                        <td style={{ textAlign: 'right' }}>{num(row.taxable)}</td>
+                                                        <td style={{ textAlign: 'right' }}>{num(tax / 2)}</td>
+                                                        <td style={{ textAlign: 'right' }}>{num(tax / 2)}</td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#F4511E' }}>{num(tax)}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            <tr style={{ fontWeight: 700 }}>
+                                                <td colSpan={3}>Total</td>
+                                                <td style={{ textAlign: 'right' }}>{num(s?.totalTaxableValue || 0)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(s?.totalCgst || 0)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(s?.totalSgst || 0)}</td>
+                                                <td style={{ textAlign: 'right', color: '#F4511E' }}>{num(s?.totalGstCollected || 0)}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p className="note-block">
+                                    <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                                    <span>
+                                        Menu and offer discounts shown on the invoice reduce the taxable value (sec. 15(3)(a)).
+                                        Coins, promo codes and HungerGame rewards are applied after the supply and are reported
+                                        separately without reducing the taxable value. {meta?.basisOfPreparation}
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── GSTR-1 ── */}
+                    {activeTab === 'gstr1' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                            <div>
+                                <h3 className="section-heading">Table 7 — B2C (Others)</h3>
+                                <div className="table-scroll">
+                                    <table className="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Place of Supply</th>
+                                                <th style={{ textAlign: 'right' }}>Rate</th>
+                                                <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                                <th style={{ textAlign: 'right' }}>IGST</th>
+                                                <th style={{ textAlign: 'right' }}>CGST</th>
+                                                <th style={{ textAlign: 'right' }}>SGST</th>
+                                                <th style={{ textAlign: 'right' }}>Invoices</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data?.b2cs.map(b => (
+                                                <tr key={b.rate}>
+                                                    <td>{meta?.placeOfSupply}</td>
+                                                    <td style={{ textAlign: 'right' }}>{b.rate}%</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(b.taxableValue)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(b.igst)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(b.cgst)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(b.sgst)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{b.invoiceCount}</td>
+                                                </tr>
+                                            ))}
+                                            {(!data?.b2cs || data.b2cs.length === 0) && (
+                                                <tr><td colSpan={7} className="empty-cell">No supplies in this period</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="section-heading">Table 12 — HSN-wise summary of outward supplies</h3>
+                                <div className="table-scroll">
+                                    <table className="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>HSN / SAC</th>
+                                                <th>Description</th>
+                                                <th>UQC</th>
+                                                <th style={{ textAlign: 'right' }}>Qty</th>
+                                                <th style={{ textAlign: 'right' }}>Rate</th>
+                                                <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                                <th style={{ textAlign: 'right' }}>CGST</th>
+                                                <th style={{ textAlign: 'right' }}>SGST</th>
+                                                <th style={{ textAlign: 'right' }}>Total Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data?.hsnSummary.map(h => (
+                                                <tr key={`${h.hsn}-${h.rate}`}>
+                                                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{h.hsn}</td>
+                                                    <td>{h.description}</td>
+                                                    <td>{h.uqc}</td>
+                                                    <td style={{ textAlign: 'right' }}>{h.quantity}</td>
+                                                    <td style={{ textAlign: 'right' }}>{h.rate}%</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(h.taxableValue)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(h.cgst)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{num(h.sgst)}</td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{num(h.total)}</td>
+                                                </tr>
+                                            ))}
+                                            {(!data?.hsnSummary || data.hsnSummary.length === 0) && (
+                                                <tr><td colSpan={9} className="empty-cell">No supplies in this period</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 className="section-heading">Table 13 — Documents issued</h3>
+                                <div className="table-scroll">
+                                    <table className="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Nature of document</th>
+                                                <th>From</th>
+                                                <th>To</th>
+                                                <th style={{ textAlign: 'right' }}>Total</th>
+                                                <th style={{ textAlign: 'right' }}>Cancelled</th>
+                                                <th style={{ textAlign: 'right' }}>Net issued</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>{data?.documentSummary.natureOfDocument}</td>
+                                                <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{data?.documentSummary.from || '—'}</td>
+                                                <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{data?.documentSummary.to || '—'}</td>
+                                                <td style={{ textAlign: 'right' }}>{data?.documentSummary.totalIssued ?? 0}</td>
+                                                <td style={{ textAlign: 'right' }}>{data?.documentSummary.cancelled ?? 0}</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 600 }}>{data?.documentSummary.net ?? 0}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Monthly Tab */}
-                    {activeTab === 'monthly' && (
-                        <div style={{ overflowX: 'auto' }}>
+                    {/* ── GSTR-3B ── */}
+                    {activeTab === 'gstr3b' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <h3 className="section-heading">Table 3.1 — Details of outward supplies</h3>
+                            <div className="table-scroll">
+                                <table className="table-premium">
+                                    <thead>
+                                        <tr>
+                                            <th>Nature of supply</th>
+                                            <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                            <th style={{ textAlign: 'right' }}>IGST</th>
+                                            <th style={{ textAlign: 'right' }}>CGST</th>
+                                            <th style={{ textAlign: 'right' }}>SGST/UTGST</th>
+                                            <th style={{ textAlign: 'right' }}>Cess</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {[data?.gstr3b.outwardTaxableSupplies, data?.gstr3b.supplies95].filter(Boolean).map((row, i) => (
+                                            <tr key={i}>
+                                                <td style={{ fontWeight: 500 }}>{row!.label}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(row!.taxableValue)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(row!.igst)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(row!.cgst)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(row!.sgst)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(row!.cess)}</td>
+                                            </tr>
+                                        ))}
+                                        <tr style={{ fontWeight: 700 }}>
+                                            <td>Net tax payable</td>
+                                            <td style={{ textAlign: 'right' }}>—</td>
+                                            <td style={{ textAlign: 'right' }}>0.00</td>
+                                            <td style={{ textAlign: 'right' }}>{num(s?.totalCgst || 0)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(s?.totalSgst || 0)}</td>
+                                            <td style={{ textAlign: 'right' }}>0.00</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p className="note-block">
+                                <Info size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                                <span>
+                                    Restaurant supplies made through the platform are reported under section 9(5); the tax on those
+                                    supplies is discharged by Delito as the e-commerce operator. Figures are indicative and should
+                                    be reconciled with the books before filing.
+                                </span>
+                            </p>
+                        </div>
+                    )}
+
+                    {/* ── Tax periods ── */}
+                    {activeTab === 'periods' && (
+                        <div className="table-scroll">
                             <table className="table-premium">
                                 <thead>
                                     <tr>
-                                        <th>Month</th>
-                                        <th style={{ textAlign: 'right' }}>Orders</th>
-                                        <th style={{ textAlign: 'right' }}>Item Sales</th>
-                                        <th style={{ textAlign: 'right' }}>Delivery Fees</th>
-                                        <th style={{ textAlign: 'right' }}>Commission (15%)</th>
-                                        <th style={{ textAlign: 'right' }}>GST (18%)</th>
-                                        <th style={{ textAlign: 'right' }}>Platform Earning</th>
+                                        <th>Tax Period</th>
+                                        <th style={{ textAlign: 'right' }}>Invoices</th>
+                                        <th style={{ textAlign: 'right' }}>Gross Sales</th>
+                                        <th style={{ textAlign: 'right' }}>Discounts</th>
+                                        <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                        <th style={{ textAlign: 'right' }}>CGST</th>
+                                        <th style={{ textAlign: 'right' }}>SGST</th>
+                                        <th style={{ textAlign: 'right' }}>Total GST</th>
+                                        <th style={{ textAlign: 'right' }}>Invoice Value</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -566,118 +721,118 @@ export default function GSTReportPage() {
                                         <tr key={m.monthKey}>
                                             <td style={{ fontWeight: 500 }}>{m.month}</td>
                                             <td style={{ textAlign: 'right' }}>{m.ordersCount}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(m.totalItemSales)}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(m.totalDeliveryFees)}</td>
-                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(m.totalCommission)}</td>
-                                            <td style={{ textAlign: 'right', color: '#F4511E', fontWeight: 600 }}>{formatCurrency(m.totalGst)}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(m.totalPlatformEarning)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(m.grossSales)}</td>
+                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{num(m.totalDiscount)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(m.taxableValue)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(m.cgst)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(m.sgst)}</td>
+                                            <td style={{ textAlign: 'right', color: '#F4511E', fontWeight: 600 }}>{num(m.totalGst)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600 }}>{num(m.invoiceValue)}</td>
                                         </tr>
                                     ))}
                                     {(!data?.monthlyData || data.monthlyData.length === 0) && (
-                                        <tr>
-                                            <td colSpan={6} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
-                                                No data available
-                                            </td>
-                                        </tr>
+                                        <tr><td colSpan={9} className="empty-cell">No data available</td></tr>
                                     )}
                                 </tbody>
                             </table>
                         </div>
                     )}
 
-                    {/* Vendor Tab */}
-                    {activeTab === 'vendor' && (
-                        <div style={{ overflowX: 'auto' }}>
+                    {/* ── Vendors ── */}
+                    {activeTab === 'vendors' && (
+                        <div className="table-scroll">
                             <table className="table-premium">
                                 <thead>
                                     <tr>
-                                        <th>Vendor</th>
-                                        <th style={{ textAlign: 'right' }}>Orders</th>
-                                        <th style={{ textAlign: 'right' }}>Item Sales</th>
-                                        <th style={{ textAlign: 'right' }}>Delivery Fees</th>
+                                        <th>Restaurant</th>
+                                        <th>GSTIN</th>
+                                        <th style={{ textAlign: 'right' }}>Invoices</th>
+                                        <th style={{ textAlign: 'right' }}>Gross Sales</th>
+                                        <th style={{ textAlign: 'right' }}>Discounts</th>
+                                        <th style={{ textAlign: 'right' }}>Taxable Value</th>
                                         <th style={{ textAlign: 'right' }}>Commission</th>
-                                        <th style={{ textAlign: 'right' }}>GST Collected</th>
-                                        <th style={{ textAlign: 'right' }}>Platform Earning</th>
+                                        <th style={{ textAlign: 'right' }}>Total GST</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {data?.vendorData.map(v => (
                                         <tr key={v.vendorId}>
                                             <td>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                    <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(244, 81, 30, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                        <Store size={16} color="#F4511E" />
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                    <div style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(244, 81, 30, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                        <Store size={15} color="#F4511E" />
                                                     </div>
                                                     <span style={{ fontWeight: 500 }}>{v.vendorName}</span>
                                                 </div>
                                             </td>
+                                            <td style={{ fontFamily: 'monospace', fontSize: '0.72rem' }}>{v.gstin || 'Unregistered'}</td>
                                             <td style={{ textAlign: 'right' }}>{v.ordersCount}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(v.totalItemSales)}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(v.totalDeliveryFees)}</td>
-                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(v.totalCommission)}</td>
-                                            <td style={{ textAlign: 'right', color: '#F4511E', fontWeight: 600 }}>{formatCurrency(v.totalGst)}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(v.totalPlatformEarning)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(v.grossSales)}</td>
+                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{num(v.totalDiscount)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(v.taxableValue)}</td>
+                                            <td style={{ textAlign: 'right' }}>{num(v.commissionTaxable)}</td>
+                                            <td style={{ textAlign: 'right', color: '#F4511E', fontWeight: 600 }}>{num(v.totalGst)}</td>
                                         </tr>
                                     ))}
                                     {(!data?.vendorData || data.vendorData.length === 0) && (
-                                        <tr>
-                                            <td colSpan={6} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
-                                                No vendor data available
-                                            </td>
-                                        </tr>
+                                        <tr><td colSpan={8} className="empty-cell">No restaurant data available</td></tr>
                                     )}
                                 </tbody>
                             </table>
                         </div>
                     )}
 
-                    {/* Transactions Tab */}
-                    {activeTab === 'transactions' && (
-                        <div style={{ overflowX: 'auto' }}>
-                            <table className="table-premium">
-                                <thead>
-                                    <tr>
-                                        <th>Order ID</th>
-                                        <th>Vendor</th>
-                                        <th>Date</th>
-                                        <th style={{ textAlign: 'right' }}>Item Total</th>
-                                        <th style={{ textAlign: 'right' }}>Delivery Fee</th>
-                                        <th style={{ textAlign: 'right' }}>Commission</th>
-                                        <th style={{ textAlign: 'right' }}>GST</th>
-                                        <th>Payment</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {data?.entries.map(e => (
-                                        <tr key={e.orderId}>
-                                            <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{e.orderId.slice(0, 8)}...</td>
-                                            <td style={{ fontWeight: 500 }}>{e.vendorName}</td>
-                                            <td style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>{formatDate(e.orderDate)}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(e.itemTotal)}</td>
-                                            <td style={{ textAlign: 'right' }}>{formatCurrency(e.deliveryFee)}</td>
-                                            <td style={{ textAlign: 'right', color: '#10B981' }}>{formatCurrency(e.commission)}</td>
-                                            <td style={{ textAlign: 'right', color: '#F4511E', fontWeight: 600 }}>{formatCurrency(e.totalGst)}</td>
-                                            <td>
-                                                <span style={{
-                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 500,
-                                                    background: e.paymentMode === 'COD' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                                                    color: e.paymentMode === 'COD' ? '#F59E0B' : '#10B981'
-                                                }}>
-                                                    {e.paymentMode}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {(!data?.entries || data.entries.length === 0) && (
+                    {/* ── Invoice register ── */}
+                    {activeTab === 'register' && (
+                        <>
+                            <div className="table-scroll">
+                                <table className="table-premium">
+                                    <thead>
                                         <tr>
-                                            <td colSpan={7} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
-                                                No transactions found
-                                            </td>
+                                            <th>Invoice No.</th>
+                                            <th>Date</th>
+                                            <th>Restaurant</th>
+                                            <th style={{ textAlign: 'right' }}>Gross</th>
+                                            <th style={{ textAlign: 'right' }}>Discount</th>
+                                            <th style={{ textAlign: 'right' }}>Taxable Value</th>
+                                            <th style={{ textAlign: 'right' }}>CGST</th>
+                                            <th style={{ textAlign: 'right' }}>SGST</th>
+                                            <th style={{ textAlign: 'right' }}>Invoice Value</th>
+                                            <th>Payment</th>
                                         </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {data?.entries.map(e => (
+                                            <tr key={e.orderId}>
+                                                <td style={{ fontFamily: 'monospace', fontSize: '0.72rem' }}>{e.invoiceNumber}</td>
+                                                <td style={{ fontSize: '0.78rem', color: 'var(--foreground-secondary)' }}>{formatDate(e.orderDate)}</td>
+                                                <td style={{ fontWeight: 500 }}>{e.vendorName}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(e.grossItemTotal)}</td>
+                                                <td style={{ textAlign: 'right', color: '#10B981' }}>{num(e.totalDiscount)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(e.taxableValue)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(e.cgst)}</td>
+                                                <td style={{ textAlign: 'right' }}>{num(e.sgst)}</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 600 }}>{num(e.invoiceValue)}</td>
+                                                <td>
+                                                    <span className="badge" style={{
+                                                        background: e.paymentMode === 'COD' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                                        color: e.paymentMode === 'COD' ? '#F59E0B' : '#10B981',
+                                                    }}>{e.paymentMode}</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {(!data?.entries || data.entries.length === 0) && (
+                                            <tr><td colSpan={10} className="empty-cell">No invoices found</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {data?.entriesTruncated && (
+                                <p style={{ fontSize: '0.72rem', color: 'var(--foreground-secondary)', marginTop: 10 }}>
+                                    Showing the 500 most recent invoices — export the register for the complete list.
+                                </p>
+                            )}
+                        </>
                     )}
                 </div>
             </motion.div>

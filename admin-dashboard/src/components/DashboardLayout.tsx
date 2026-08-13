@@ -39,6 +39,20 @@ function DashboardContent({ children }: DashboardLayoutProps) {
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
+    // On phones the sidebar is an overlay drawer — close it after navigating
+    useEffect(() => {
+        if (isMobile) setSidebarCollapsed(true);
+    }, [pathname, isMobile]);
+
+    // Lock background scrolling while the drawer is open on a phone
+    useEffect(() => {
+        if (isMobile && !sidebarCollapsed) {
+            const previous = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+            return () => { document.body.style.overflow = previous; };
+        }
+    }, [isMobile, sidebarCollapsed]);
+
     useEffect(() => {
         if (!isLoading && !user && !isLoginPage) {
             router.push('/login');

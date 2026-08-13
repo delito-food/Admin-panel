@@ -466,7 +466,7 @@ export default function OrderAssignmentPage() {
                                 <X size={18} />
                             </button>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
                             <div>
                                 <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--foreground)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                                     <User size={14} /> Customer

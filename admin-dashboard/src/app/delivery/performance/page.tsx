@@ -217,7 +217,7 @@ export default function DeliveryPerformancePage() {
                         </div>
 
                         {/* Key Metrics */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
                             {[
                                 { label: 'Total Deliveries', val: selectedPartner.totalDeliveries, c: 'var(--foreground)' },
                                 { label: 'Success Rate', val: `${selectedPartner.successRate}%`, c: '#10B981' },
@@ -232,7 +232,7 @@ export default function DeliveryPerformancePage() {
                         </div>
 
                         {/* Delivery Breakdown */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 16 }}>
                             {[
                                 { label: 'Completed', val: selectedPartner.completedDeliveries, bg: 'rgba(16,185,129,0.08)', bc: 'rgba(16,185,129,0.2)', c: '#10B981' },
                                 { label: 'Pending', val: selectedPartner.pendingDeliveries, bg: 'rgba(59,130,246,0.08)', bc: 'rgba(59,130,246,0.2)', c: '#3B82F6' },
@@ -247,7 +247,7 @@ export default function DeliveryPerformancePage() {
                         </div>
 
                         {/* COD */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
                             {[
                                 { label: 'COD Collected', val: formatCurrency(selectedPartner.codCollected), c: '#10B981' },
                                 { label: 'COD Settled', val: formatCurrency(selectedPartner.codSettled), c: '#3B82F6' },

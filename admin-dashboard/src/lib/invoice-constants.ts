@@ -33,8 +33,12 @@ export const HSN_CODES = {
     PLATFORM: '998599',     // Other support services (platform fee)
 };
 
-// Invoice number prefix
-export const INVOICE_PREFIX = 'DELITO';
+// Invoice number prefix.
+// NOTE: numbers are now issued as INV-<year>-<counter> (no company prefix).
+// Legacy numbers stored in Firestore may still carry the DELITO- prefix —
+// use formatInvoiceNumber() to normalise them on output.
+export const INVOICE_PREFIX = 'INV';
+export const LEGACY_INVOICE_PREFIX = 'DELITO';
 
 // ─── Commission Invoice Constants ───
 export const COMMISSION_PLATFORM = {
@@ -103,12 +107,24 @@ export interface CommissionInvoiceData {
 
 /**
  * Generate invoice number from a sequential counter
- * Format: DELITO-INV-2026-000001
+ * Format: INV-2026-000001
  */
 export function generateInvoiceNumber(counter: number): string {
     const year = new Date().getFullYear();
     const paddedCounter = String(counter).padStart(6, '0');
-    return `${INVOICE_PREFIX}-INV-${year}-${paddedCounter}`;
+    return `${INVOICE_PREFIX}-${year}-${paddedCounter}`;
+}
+
+/**
+ * Normalise an invoice number for display/export.
+ * Strips the legacy company prefix so both old and new records render as
+ * INV-2026-000042 (with an optional -F / -D / -P sub-invoice suffix).
+ */
+export function formatInvoiceNumber(invoiceNumber?: string | null): string {
+    if (!invoiceNumber) return '';
+    return invoiceNumber
+        .trim()
+        .replace(new RegExp(`^${LEGACY_INVOICE_PREFIX}[-_\\s]*`, 'i'), '');
 }
 
 /**
@@ -118,7 +134,8 @@ export interface InvoiceData {
     // Header
     invoiceNumber: string;
     invoiceDate: string;
-    invoiceType: 'Tax Invoice' | 'Bill of Supply';
+    /** Every Delito invoice is issued as a Tax Invoice. */
+    invoiceType: 'Tax Invoice';
     invoiceSubType?: 'food' | 'delivery' | 'platform';
     onBehalfOf?: string; // e.g. "on behalf of <vendor name>" or "on behalf of <delivery person>"
 
@@ -153,6 +170,8 @@ export interface InvoiceData {
     // Bill Summary
     billSummary: {
         itemTotal: number;
+        /** Menu/offer level discount already applied on the item lines */
+        itemDiscount: number;
         discount: number;
         deliveryDiscount: number;
         hungerGameDiscount: number;
@@ -166,6 +185,8 @@ export interface InvoiceData {
         sgst: number;
         totalTax: number;
         roundOff: number;
+        /** Sum of every discount line shown on the invoice */
+        totalDiscount: number;
         grandTotal: number;
     };
 

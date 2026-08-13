@@ -300,8 +300,17 @@ export interface Order {
     }>;
     itemNames: string[];
     itemTotal: number;
+    originalItemTotal?: number;
     subtotal: number;
     discount: number;
+    /** Menu / special-offer discount already applied to the item lines */
+    itemDiscount?: number;
+    deliveryDiscount?: number;
+    hungerGameDiscount?: number;
+    /** Sum of every discount applied to the order */
+    totalDiscount?: number;
+    /** Invoice number issued for this order (INV-2026-000042) */
+    invoiceNumber?: string;
     deliveryFee: number;
     taxes: number;
     tip: number;

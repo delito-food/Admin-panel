@@ -217,7 +217,7 @@ export default function VendorPerformancePage() {
                         </div>
 
                         {/* Key Metrics */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
                             {[
                                 { label: 'Total Revenue', val: formatCurrency(selectedVendor.totalRevenue), c: '#10B981' },
                                 { label: 'Total Orders', val: selectedVendor.totalOrders, c: 'var(--foreground)' },
@@ -232,7 +232,7 @@ export default function VendorPerformancePage() {
                         </div>
 
                         {/* Order Breakdown */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 16 }}>
                             {[
                                 { label: 'Completed', val: selectedVendor.completedOrders, bg: 'rgba(16,185,129,0.08)', bc: 'rgba(16,185,129,0.2)', c: '#10B981' },
                                 { label: 'Preparing', val: selectedVendor.preparingOrders, bg: 'rgba(245,158,11,0.08)', bc: 'rgba(245,158,11,0.2)', c: '#F59E0B' },

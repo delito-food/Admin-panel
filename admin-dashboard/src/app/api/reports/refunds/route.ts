@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
+import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
 
 export async function GET(request: Request) {
     try {
@@ -25,7 +26,11 @@ export async function GET(request: Request) {
         // Get all orders
         const orderDocs = await cachedCollection(collections.orders);
 
+        // Invoice numbers so every credit note row can be traced to its invoice
+        const invoiceNumbers = await getInvoiceNumberMap();
+
         interface RefundEntry {
+            invoiceNumber: string;
             orderId: string;
             vendorId: string;
             vendorName: string;
@@ -111,6 +116,7 @@ export async function GET(request: Request) {
             const paymentMode = (order.paymentMode as string) || 'Unknown';
 
             refundEntries.push({
+                invoiceNumber: invoiceNumberFor(invoiceNumbers, order.id),
                 orderId: order.id,
                 vendorId,
                 vendorName,

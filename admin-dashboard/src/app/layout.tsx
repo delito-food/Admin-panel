@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -12,6 +12,14 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Delito Admin Dashboard",
   description: "Admin dashboard for Delito food delivery platform",
+};
+
+// Phone-first viewport — allows pinch-zoom on the wide report tables
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

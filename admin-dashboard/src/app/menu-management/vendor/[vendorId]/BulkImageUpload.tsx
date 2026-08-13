@@ -222,7 +222,7 @@ export default function BulkImageUpload({ vendorId, items, onClose }: BulkImageU
                             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={(e) => e.target.files && handleFiles(e.target.files)} />
                         </div>
 
-                        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl overflow-hidden shadow-sm">
+                        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl overflow-hidden shadow-sm table-scroll">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-[var(--surface-hover)] border-b border-[var(--border)] text-xs uppercase tracking-wider text-[var(--foreground-secondary)]">
                                     <tr>

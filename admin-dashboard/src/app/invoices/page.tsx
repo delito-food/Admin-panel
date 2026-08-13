@@ -124,6 +124,58 @@ export default function InvoicesPage() {
         }
     };
 
+    // Export the filtered invoice list (opens directly in Excel)
+    const handleExport = () => {
+        const headers = [
+            'Invoice No.', 'Food Invoice No.', 'Delivery Invoice No.', 'Platform Invoice No.',
+            'Order ID', 'Date', 'Time', 'Customer', 'Phone', 'Vendor', 'Status',
+            'Payment Mode', 'Payment Status',
+            'Gross Item Total', 'Item Discount', 'Item Total',
+            'Promo Discount', 'Coin Discount', 'HungerGame Discount', 'Delivery Discount',
+            'Total Discount', 'Delivery Fee', 'Platform Fee', 'Taxes (GST)', 'Grand Total',
+        ];
+        const esc = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const rows = filteredOrders.map(o => {
+            const d = new Date(o.createdAt);
+            const inv = o.invoiceNumber && o.invoiceNumber !== 'Not issued' ? o.invoiceNumber : '';
+            const itemDiscount = o.itemDiscount || 0;
+            return [
+                esc(o.invoiceNumber || ''),
+                esc(inv ? `${inv}-F` : ''),
+                esc(inv && (o.deliveryFee || 0) > 0 ? `${inv}-D` : ''),
+                esc(inv && (o.smallOrderSupportFee || 0) > 0 ? `${inv}-P` : ''),
+                esc(o.orderId),
+                esc(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })),
+                esc(d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })),
+                esc(o.customerName || ''),
+                esc(o.customerPhone || ''),
+                esc(o.vendorName || ''),
+                esc(o.status),
+                esc(o.paymentMode),
+                esc(o.paymentStatus),
+                ((o.itemTotal || 0) + itemDiscount).toFixed(2),
+                itemDiscount.toFixed(2),
+                (o.itemTotal || 0).toFixed(2),
+                (o.promoDiscount || 0).toFixed(2),
+                (o.coinDiscount || 0).toFixed(2),
+                (o.hungerGameDiscount || 0).toFixed(2),
+                (o.deliveryDiscount || 0).toFixed(2),
+                (o.totalDiscount || 0).toFixed(2),
+                (o.deliveryFee || 0).toFixed(2),
+                (o.smallOrderSupportFee || 0).toFixed(2),
+                (o.taxes || 0).toFixed(2),
+                (o.total || 0).toFixed(2),
+            ].join(',');
+        });
+        const csv = '﻿' + [headers.map(esc).join(','), ...rows].join('\n');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Invoices_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     // Preview invoice
     const handlePreview = async (order: Order) => {
         setPreviewOrder(order);
@@ -169,14 +221,20 @@ export default function InvoicesPage() {
                     </h1>
                     <p className="page-subtitle">Generate and download tax invoices for all orders</p>
                 </div>
-                <button
-                    onClick={handleRefresh}
-                    className="btn btn-outline"
-                    disabled={refreshing}
-                >
-                    <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-                    Refresh
-                </button>
+                <div className="page-header-actions">
+                    <button onClick={handleExport} className="btn btn-outline" disabled={filteredOrders.length === 0}>
+                        <Download size={16} />
+                        Export Excel
+                    </button>
+                    <button
+                        onClick={handleRefresh}
+                        className="btn btn-outline"
+                        disabled={refreshing}
+                    >
+                        <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {/* ─── Stats Cards ─── */}
@@ -332,7 +390,7 @@ export default function InvoicesPage() {
                 <div className="glass-card" style={{ overflow: 'hidden' }}>
                     {/* Table header */}
                     <div className="invoice-table-header">
-                        <span>Order ID</span>
+                        <span>Order / Invoice No.</span>
                         <span>Customer</span>
                         <span className="invoice-col-vendor">Vendor</span>
                         <span>Date</span>
@@ -359,11 +417,16 @@ export default function InvoicesPage() {
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-hover)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                             >
-                                {/* Order ID */}
+                                {/* Order ID + issued invoice number */}
                                 <div>
                                     <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.82rem' }}>
                                         #{order.orderId?.slice(-8).toUpperCase()}
                                     </span>
+                                    {order.invoiceNumber && order.invoiceNumber !== 'Not issued' && (
+                                        <p style={{ fontFamily: 'monospace', fontSize: '0.66rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>
+                                            {order.invoiceNumber}
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Customer */}
@@ -681,10 +744,19 @@ export default function InvoicesPage() {
                                         }}>
                                             <p style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 10 }}>Bill Summary</p>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                {previewData.billSummary.itemTotal > 0 && <BillRow label="Item Total" amount={previewData.billSummary.itemTotal} />}
+                                                {(previewData.billSummary.itemDiscount || 0) > 0 ? (
+                                                    <>
+                                                        <BillRow label="Item Total (Gross)" amount={previewData.billSummary.itemTotal + previewData.billSummary.itemDiscount} />
+                                                        <BillRow label="Item Discount" amount={previewData.billSummary.itemDiscount} isNeg />
+                                                    </>
+                                                ) : (
+                                                    previewData.billSummary.itemTotal > 0 && <BillRow label="Item Total" amount={previewData.billSummary.itemTotal} />
+                                                )}
                                                 {previewData.billSummary.discount > 0 && <BillRow label="Discount" amount={previewData.billSummary.discount} isNeg />}
+                                                {(previewData.billSummary.hungerGameDiscount || 0) > 0 && <BillRow label="🎮 HungerGame Discount" amount={previewData.billSummary.hungerGameDiscount} isNeg />}
                                                 {previewData.billSummary.coinDiscount > 0 && <BillRow label="🪙 Coin Discount" amount={previewData.billSummary.coinDiscount} isNeg />}
                                                 {previewData.billSummary.promoDiscount > 0 && <BillRow label="🎟️ Promo Discount" amount={previewData.billSummary.promoDiscount} isNeg />}
+                                                {(previewData.billSummary.deliveryDiscount || 0) > 0 && <BillRow label="🚴 Delivery Discount" amount={previewData.billSummary.deliveryDiscount} isNeg />}
                                                 {previewData.billSummary.deliveryFee > 0 && <BillRow label="Delivery Fee" amount={previewData.billSummary.deliveryFee} />}
                                                 {previewData.billSummary.packagingFee > 0 && <BillRow label="Platform Fee" amount={previewData.billSummary.packagingFee} />}
                                                 {previewData.billSummary.tip > 0 && <BillRow label="Delivery Tip" amount={previewData.billSummary.tip} />}
@@ -721,8 +793,10 @@ export default function InvoicesPage() {
                                                 {(() => {
                                                     const computed = (previewData.billSummary.itemTotal || 0)
                                                         - (previewData.billSummary.discount || 0)
+                                                        - (previewData.billSummary.hungerGameDiscount || 0)
                                                         - (previewData.billSummary.coinDiscount || 0)
                                                         - (previewData.billSummary.promoDiscount || 0)
+                                                        - (previewData.billSummary.deliveryDiscount || 0)
                                                         + (previewData.billSummary.deliveryFee || 0)
                                                         + (previewData.billSummary.packagingFee || 0)
                                                         + (previewData.billSummary.tip || 0)

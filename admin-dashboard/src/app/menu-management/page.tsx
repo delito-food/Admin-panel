@@ -32,8 +32,8 @@ interface MenuItem {
     adminNotes: string;
     rejectionReason: string;
     submittedAt: string;
-    approvedAt: string;
     updatedAt: string;
+    tags?: string[];
 }
 
 interface Summary {
@@ -63,6 +63,7 @@ export default function MenuManagementPage() {
     const [rejectionReason, setRejectionReason] = useState('');
     const [newPrice, setNewPrice] = useState<string>('');
     const [processing, setProcessing] = useState(false);
+    const [tagModal, setTagModal] = useState<{ item: MenuItem; tags: string[]; newTag: string } | null>(null);
 
     // Bulk action state
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -133,6 +134,33 @@ export default function MenuManagementPage() {
                 fetchData();
             } else {
                 alert(result.error || 'Action failed');
+            }
+        } catch {
+            alert('Network error');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleUpdateTags = async () => {
+        if (!tagModal) return;
+        setProcessing(true);
+        try {
+            const res = await fetch('/api/menu-management', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    itemId: tagModal.item.itemId,
+                    action: 'update_tags',
+                    tags: tagModal.tags,
+                }),
+            });
+            const result = await res.json();
+            if (result.success) {
+                setTagModal(null);
+                fetchData();
+            } else {
+                alert(result.error || 'Failed to update tags');
             }
         } catch {
             alert('Network error');
@@ -746,6 +774,30 @@ export default function MenuManagementPage() {
                                     )}
                                 </div>
 
+                                {/* Tags */}
+                                <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--surface-hover)', border: '1px solid var(--border)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                        <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Search Tags</p>
+                                        <button 
+                                            onClick={() => setTagModal({ item: selectedItem, tags: selectedItem.tags || [], newTag: '' })}
+                                            style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                                        >
+                                            Edit Tags
+                                        </button>
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                        {selectedItem.tags && selectedItem.tags.length > 0 ? (
+                                            selectedItem.tags.map((tag, idx) => (
+                                                <span key={idx} style={{ padding: '4px 10px', background: 'rgba(244,81,30,0.1)', color: 'var(--primary)', borderRadius: 12, fontSize: '0.75rem', fontWeight: 600 }}>
+                                                    #{tag}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>No tags added.</span>
+                                        )}
+                                    </div>
+                                </div>
+
                                 {/* Admin Notes / Rejection Reason */}
                                 {selectedItem.rejectionReason && (
                                     <div style={{ padding: '12px 16px', borderRadius: 12, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -962,6 +1014,60 @@ export default function MenuManagementPage() {
                                         </div>
                                     </div>
                                 )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+                {/* Tag Edit Modal */}
+                {tagModal && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => setTagModal(null)}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="modal-content w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+                            <div className="modal-header">
+                                <h2 className="modal-title">Edit Tags</h2>
+                                <button onClick={() => setTagModal(null)} className="btn btn-ghost btn-icon-sm"><X size={20} /></button>
+                            </div>
+                            <div className="modal-body space-y-4">
+                                <p style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>Add tags to improve search discoverability for <strong>{tagModal.item.name}</strong>.</p>
+                                
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 40, padding: '10px 12px', background: 'var(--surface-hover)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                                    {tagModal.tags.map((tag, idx) => (
+                                        <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', background: 'var(--primary)', color: 'white', borderRadius: 12, fontSize: '0.75rem', fontWeight: 600 }}>
+                                            {tag}
+                                            <button 
+                                                onClick={() => setTagModal({ ...tagModal, tags: tagModal.tags.filter((_, i) => i !== idx) })}
+                                                style={{ background: 'transparent', border: 'none', color: 'white', padding: 0, display: 'flex', cursor: 'pointer' }}
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </span>
+                                    ))}
+                                    <input
+                                        type="text"
+                                        value={tagModal.newTag}
+                                        onChange={(e) => setTagModal({ ...tagModal, newTag: e.target.value })}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && tagModal.newTag.trim()) {
+                                                e.preventDefault();
+                                                const newT = tagModal.newTag.trim().toLowerCase();
+                                                if (!tagModal.tags.includes(newT)) {
+                                                    setTagModal({ ...tagModal, tags: [...tagModal.tags, newT], newTag: '' });
+                                                }
+                                            }
+                                        }}
+                                        placeholder="Add tag and press Enter"
+                                        style={{ flex: 1, minWidth: 120, background: 'transparent', border: 'none', outline: 'none', fontSize: '0.8rem', color: 'var(--foreground)' }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: 10, paddingTop: 10 }}>
+                                    <button onClick={() => setTagModal(null)} style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', color: 'var(--foreground)', fontWeight: 600, fontSize: '0.85rem' }}>Cancel</button>
+                                    <button 
+                                        onClick={handleUpdateTags} 
+                                        disabled={processing}
+                                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px', borderRadius: 10, border: 'none', cursor: processing ? 'not-allowed' : 'pointer', background: 'var(--primary)', color: 'white', fontWeight: 600, fontSize: '0.85rem', opacity: processing ? 0.6 : 1 }}
+                                    >
+                                        {processing ? <Loader2 size={16} className="animate-spin" /> : 'Save Tags'}
+                                    </button>
+                                </div>
                             </div>
                         </motion.div>
                     </motion.div>

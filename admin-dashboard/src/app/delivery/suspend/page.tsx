@@ -197,7 +197,7 @@ export default function SuspendedDeliveryPage() {
                     </div>
                 ) : activeTab === 'suspended' ? (
                     /* Suspended List */
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-sm overflow-hidden table-scroll">
                         {suspendedPersons.length === 0 ? (
                             <div className="text-center py-12">
                                 <p className="text-gray-500">✅ No suspended delivery persons</p>
@@ -255,7 +255,7 @@ export default function SuspendedDeliveryPage() {
                     </div>
                 ) : (
                     /* Active List */
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-xl shadow-sm overflow-hidden table-scroll">
                         {allPersons.length === 0 ? (
                             <div className="text-center py-12">
                                 <p className="text-gray-500">No active delivery persons found</p>

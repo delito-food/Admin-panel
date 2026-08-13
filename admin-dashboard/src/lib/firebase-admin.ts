@@ -114,6 +114,7 @@ export const collections = {
     deliveryHistory: 'deliveryHistory',
     wallets: 'wallets',
     pushNotifications: 'pushNotifications',
+    invoices: 'invoices',
 } as const;
 
 // Check if Firebase is available

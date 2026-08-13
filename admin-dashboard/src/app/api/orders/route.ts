@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedResponse } from '@/lib/api-auth';
+import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
 
 export async function GET(request: Request) {
     try {
@@ -31,6 +32,9 @@ export async function GET(request: Request) {
         }
 
         const snapshot = await query.get();
+
+        // Invoice numbers issued for these orders (used in the UI and CSV export)
+        const invoiceNumbers = await getInvoiceNumberMap();
 
         // Collect ALL unique delivery person IDs and vendor IDs for batch lookup
         // Note: collect deliveryPersonId regardless of whether name is stored,
@@ -76,6 +80,8 @@ export async function GET(request: Request) {
                 }
             });
         }
+
+        const round2 = (n: number): number => Math.round(n * 100) / 100;
 
         // Helper to parse any Firestore timestamp to ISO string or null
         const tsToIso = (v: any): string | null => {
@@ -197,8 +203,36 @@ export async function GET(request: Request) {
             // Compute pickedUpAt: order doc field → delivery task picked up time
             const pickedUpAt = tsToIso(data.pickedUpAt) || tsToIso(taskInfo?.pickedUpAt) || null;
 
+            // ── Discounts ──
+            // `discount` on the order document only ever carries the delivery
+            // discount. The real customer-facing discounts are spread across the
+            // fields below, so expose each one plus a combined total.
+            const itemLineDiscount = (data.items || []).reduce((sum: number, it: any) => {
+                const qty = it.quantity || 1;
+                const price = it.price || 0;
+                const original = it.originalPrice ?? price;
+                return sum + Math.max(0, (original - price) * qty);
+            }, 0);
+            const originalItemTotal = data.originalItemTotal || 0;
+            const itemTotalValue = data.itemTotal || data.subtotal || 0;
+            const itemDiscount = Math.max(
+                itemLineDiscount,
+                originalItemTotal > itemTotalValue ? originalItemTotal - itemTotalValue : 0
+            );
+            const hungerGameDeliveryDiscount = data.hungerGameLevel2DeliveryDiscount || 0;
+            const hungerGameComponents = (data.hungerGameLevel1Discount || 0)
+                + (data.hungerGameCouponDiscount || 0)
+                + (data.hungerGameLevel5Savings || 0);
+            const hungerGameDiscount = hungerGameComponents > 0
+                ? hungerGameComponents
+                : Math.max(0, (data.hungerGameDiscount || 0) - hungerGameDeliveryDiscount);
+            const deliveryDiscount = (data.deliveryDiscount ?? data.discount ?? 0) + hungerGameDeliveryDiscount;
+            const totalDiscount = itemDiscount + hungerGameDiscount + deliveryDiscount
+                + (data.coinDiscount || 0) + (data.promoDiscount || 0);
+
             return {
                 orderId: doc.id,
+                invoiceNumber: invoiceNumberFor(invoiceNumbers, doc.id),
                 vendorId,
                 vendorName: data.vendorName || vendor?.shopName || '',
                 vendorPhone: vendor?.phone || '',
@@ -210,14 +244,19 @@ export async function GET(request: Request) {
                 items: data.items || [],
                 itemNames: data.itemNames || [],
                 itemTotal: data.itemTotal || data.subtotal || 0,
+                originalItemTotal: originalItemTotal || (data.itemTotal || data.subtotal || 0),
                 subtotal: data.subtotal || data.itemTotal || 0,
                 discount: data.discount || 0,
+                itemDiscount: round2(itemDiscount),
+                deliveryDiscount: round2(deliveryDiscount),
+                hungerGameDiscount: round2(hungerGameDiscount),
+                totalDiscount: round2(totalDiscount),
                 deliveryFee: data.deliveryFee || 0,
                 taxes: data.taxes || 0,
                 tip: data.tip || 0,
                 smallOrderSupportFee: data.smallOrderSupportFee || 0,
                 total: data.total || 0,
-                status: (data.status !== 'Cancelled' && data.status !== 'Cancelled by Admin' && (taskInfo?.taskStatus === 'DELIVERED' || taskInfo?.taskStatus === 'COMPLETED' || data.deliveryPinVerified === true || !!data.deliveredAt || !!data.completedAt)) ? 'Delivered' : (data.status || 'Pending'),
+                status: data.status || 'Pending',
                 paymentMode: data.paymentMode || 'Cash on Delivery',
                 paymentStatus: data.paymentStatus || 'Pending',
                 deliveryAddress: data.deliveryAddress || '',
@@ -270,13 +309,14 @@ export async function GET(request: Request) {
         if (format === 'csv') {
             const bom = '\uFEFF';
             const lines: string[] = [];
-            lines.push('"Order ID","Date","Time","Customer","Phone","Vendor","Status","Payment Mode","Payment Status","Items","Item Total (₹)","Discount (₹)","Delivery Fee (₹)","Taxes (₹)","Total (₹)","Delivery Address","Delivery Person","Promo Code","Promo Disc (₹)","Coins Used","Coin Disc (₹)"');
+            lines.push('"Invoice No.","Order ID","Date","Time","Customer","Phone","Vendor","Status","Payment Mode","Payment Status","Items","Gross Item Total (₹)","Item Discount (₹)","Item Total (₹)","Promo Disc (₹)","Coin Disc (₹)","HungerGame Disc (₹)","Delivery Disc (₹)","Total Discount (₹)","Delivery Fee (₹)","Taxes (₹)","Total (₹)","Delivery Address","Delivery Person","Promo Code","Coins Used"');
             orders.forEach((o: any) => {
                 const d = new Date(o.createdAt);
                 const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
                 const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
                 const itemList = (o.itemNames || []).join('; ');
-                lines.push(`"${o.orderId}","${date}","${time}","${(o.customerName || '').replace(/"/g, '""')}","${o.customerPhone}","${(o.vendorName || '').replace(/"/g, '""')}","${o.status}","${o.paymentMode}","${o.paymentStatus}","${itemList.replace(/"/g, '""')}",${(o.itemTotal || 0).toFixed(2)},${(o.discount || 0).toFixed(2)},${(o.deliveryFee || 0).toFixed(2)},${(o.taxes || 0).toFixed(2)},${(o.total || 0).toFixed(2)},"${(o.deliveryAddress || '').replace(/"/g, '""')}","${(o.deliveryPersonName || '')}","${o.promoCode || ''}",${(o.promoDiscount || 0).toFixed(2)},${o.coinsUsed || 0},${(o.coinDiscount || 0).toFixed(2)}`);
+                const grossItemTotal = (o.itemTotal || 0) + (o.itemDiscount || 0);
+                lines.push(`"${o.invoiceNumber || ''}","${o.orderId}","${date}","${time}","${(o.customerName || '').replace(/"/g, '""')}","${o.customerPhone}","${(o.vendorName || '').replace(/"/g, '""')}","${o.status}","${o.paymentMode}","${o.paymentStatus}","${itemList.replace(/"/g, '""')}",${grossItemTotal.toFixed(2)},${(o.itemDiscount || 0).toFixed(2)},${(o.itemTotal || 0).toFixed(2)},${(o.promoDiscount || 0).toFixed(2)},${(o.coinDiscount || 0).toFixed(2)},${(o.hungerGameDiscount || 0).toFixed(2)},${(o.deliveryDiscount || 0).toFixed(2)},${(o.totalDiscount || 0).toFixed(2)},${(o.deliveryFee || 0).toFixed(2)},${(o.taxes || 0).toFixed(2)},${(o.total || 0).toFixed(2)},"${(o.deliveryAddress || '').replace(/"/g, '""')}","${(o.deliveryPersonName || '')}","${o.promoCode || ''}",${o.coinsUsed || 0}`);
             });
             return new Response(bom + lines.join('\n'), {
                 headers: {

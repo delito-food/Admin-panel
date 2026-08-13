@@ -2230,3 +2230,368 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===================================
+   SHARED PAGE PRIMITIVES
+   (used by the reports pages; safe on every screen size)
+   =================================== */
+
+.page-container {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.section-heading {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--foreground);
+  margin-bottom: 12px;
+}
+
+/* Any wide table lives inside one of these so it scrolls instead of
+   blowing out the page width on a phone. */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll .table-premium {
+  min-width: 720px;
+}
+
+.empty-cell {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--foreground-secondary);
+}
+
+.note-block {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(244, 81, 30, 0.07);
+  border: 1px solid rgba(244, 81, 30, 0.18);
+  color: var(--foreground-secondary);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-button {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  padding: 14px 18px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--foreground-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.dropdown-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+
+.input-control {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  outline: none;
+}
+
+.chip-button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: rgba(244, 81, 30, 0.08);
+  color: var(--primary);
+  border: 1px solid rgba(244, 81, 30, 0.2);
+  cursor: pointer;
+}
+
+.gst-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.gst-meta-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--foreground-secondary);
+  margin-bottom: 2px;
+}
+
+.gst-meta-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--foreground);
+  word-break: break-word;
+}
+
+/* ===================================
+   PHONE PASS — applies to every page
+   =================================== */
+
+/* Nothing may push the viewport wider than the screen */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+@media (max-width: 1023px) {
+  /* Sidebar becomes an off-canvas drawer instead of stealing 80px
+     of an already narrow screen. */
+  .sidebar-premium {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.18);
+  }
+
+  .sidebar-premium.is-collapsed {
+    transform: translateX(-110%);
+    box-shadow: none;
+  }
+
+  .sidebar-premium.is-open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 768px) {
+  /* ── Layout ── */
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: var(--space-5);
+  }
+
+  .page-header-actions {
+    width: 100%;
+  }
+
+  .page-header-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .page-header-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .page-subtitle {
+    font-size: 0.78rem;
+  }
+
+  .page-content {
+    gap: var(--space-6);
+  }
+
+  /* ── Cards & grids ── */
+  .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+
+  .glass-card {
+    padding: var(--space-4);
+  }
+
+  /* ── Tables ── */
+  .table-scroll .table-premium {
+    min-width: 640px;
+  }
+
+  .table-scroll > table,
+  .table-scroll table.w-full,
+  .table-scroll table.min-w-full {
+    min-width: 640px;
+  }
+
+  .table-premium td,
+  .table-premium th {
+    white-space: nowrap;
+  }
+
+  /* ── Tabs ── */
+  .tab-button {
+    flex: 0 0 auto;
+    padding: 12px 14px;
+    font-size: 0.78rem;
+  }
+
+  /* ── Dropdowns / filters ── */
+  .dropdown-panel {
+    right: auto;
+    left: 0;
+    width: min(320px, calc(100vw - 32px));
+  }
+
+  .dropdown-menu {
+    max-width: calc(100vw - 32px);
+  }
+
+  /* ── Modals ── */
+  .modal-overlay {
+    padding: 8px;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    margin: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  .modal-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* ── Charts ── */
+  .chart-container {
+    height: 220px;
+  }
+
+  .recharts-wrapper,
+  .recharts-surface {
+    max-width: 100%;
+  }
+
+  /* ── Forms ── */
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+    /* 16px keeps iOS Safari from zooming in on focus */
+    font-size: 16px;
+  }
+
+  .input-control {
+    font-size: 16px;
+  }
+
+  /* ── Touch targets ── */
+  .btn,
+  .tab-button,
+  .dropdown-item {
+    min-height: 40px;
+  }
+
+  /* ── Safety net for inline-styled rows ──
+     Most pages lay their headers and toolbars out with an inline
+     `justify-content: space-between` flex row. Letting those wrap keeps
+     buttons and titles on screen instead of overflowing the viewport.
+     Wrapping only kicks in when the content does not fit, so wider
+     screens are unaffected. */
+  main [style*="space-between"] {
+    flex-wrap: wrap;
+  }
+
+  /* Long ids, emails and addresses shouldn't widen the page */
+  main p,
+  main span,
+  main td,
+  main h1,
+  main h2,
+  main h3 {
+    overflow-wrap: anywhere;
+  }
+
+  /* Anything explicitly sized wider than the screen scrolls its parent */
+  main > div {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .gst-meta-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .section-heading {
+    font-size: 0.88rem;
+  }
+
+  .note-block {
+    font-size: 0.68rem;
+  }
+
+  .table-scroll .table-premium {
+    min-width: 560px;
+    font-size: 0.75rem;
+  }
+}

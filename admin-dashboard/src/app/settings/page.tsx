@@ -48,7 +48,7 @@ export default function SettingsPage() {
                 <p style={{ fontSize: '0.875rem', color: 'var(--foreground-secondary)', marginTop: 4 }}>Configure platform settings and preferences</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
                 {/* Sidebar */}
                 <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="glass-card" style={{ padding: 8, alignSelf: 'start' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
