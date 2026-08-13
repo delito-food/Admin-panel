@@ -255,19 +255,19 @@ export default function GSTReportPage() {
 
     const isFiltered = !!(appliedStart || appliedEnd);
 
-    const exportSection = async (section: string) => {
+    const exportSection = async (section: string, format: 'xlsx' | 'csv' = 'xlsx') => {
         setShowExportMenu(false);
         setExporting(section);
         try {
             const params = new URLSearchParams();
             if (appliedStart) params.set('startDate', appliedStart);
             if (appliedEnd) params.set('endDate', appliedEnd);
-            params.set('format', 'csv');
+            params.set('format', format);
             params.set('section', section);
             // Must go through authenticatedFetch — /api/* requires a bearer token
             await downloadAuthenticatedFile(
                 `/api/reports/gst?${params.toString()}`,
-                `GST-${section}.csv`
+                `GST-${section}.${format}`
             );
         } catch (err) {
             alert(err instanceof Error ? err.message : 'Export failed. Please try again.');
@@ -390,7 +390,8 @@ export default function GSTReportPage() {
                             <ChevronDown size={14} />
                         </button>
                         {showExportMenu && (
-                            <div className="dropdown-panel" style={{ minWidth: 240, gap: 2, padding: 6 }}>
+                            <div className="dropdown-panel" style={{ minWidth: 280, gap: 2, padding: 6 }}>
+                                <p className="dropdown-heading">Excel workbook — or click CSV</p>
                                 {[
                                     { key: 'register', label: 'Invoice register (all columns)' },
                                     { key: 'b2cs', label: 'GSTR-1 Table 7 — B2C (Others)' },
@@ -398,9 +399,18 @@ export default function GSTReportPage() {
                                     { key: 'monthly', label: 'Tax period summary' },
                                     { key: 'vendor', label: 'Restaurant-wise summary' },
                                 ].map(opt => (
-                                    <button key={opt.key} onClick={() => exportSection(opt.key)} className="dropdown-item">
-                                        <FileSpreadsheet size={14} /> {opt.label}
-                                    </button>
+                                    <div key={opt.key} className="export-option">
+                                        <button onClick={() => exportSection(opt.key, 'xlsx')} className="dropdown-item" style={{ flex: 1 }}>
+                                            <FileSpreadsheet size={14} /> {opt.label}
+                                        </button>
+                                        <button
+                                            onClick={() => exportSection(opt.key, 'csv')}
+                                            className="export-option-csv"
+                                            title={`Download ${opt.label} as CSV instead`}
+                                        >
+                                            CSV
+                                        </button>
+                                    </div>
                                 ))}
                             </div>
                         )}

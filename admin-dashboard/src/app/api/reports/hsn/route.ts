@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
 import { getInvoiceNumberMap } from '@/lib/invoice-lookup';
+import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
+import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -124,12 +126,54 @@ export async function GET(request: Request) {
             totalCess: 0,
         };
 
-        if (format === 'csv') {
-            const bom = '\uFEFF';
-            const csv = generateHSNCSV(hsnRows, totals, fromDate, toDate, documentRange);
-            return new Response(bom + csv, {
-                headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="HSN_Summary_${fromDate.toISOString().slice(0, 10)}_${toDate.toISOString().slice(0, 10)}.csv"` },
-            });
+        if (format === 'csv' || format === 'xlsx') {
+            const spec: XlsxSheetSpec = {
+                sheetName: 'HSN Summary',
+                title: 'HSN Summary — GSTR-1 Table 12',
+                subtitle: 'HSN/SAC-wise summary of outward supplies',
+                meta: platformMeta([
+                    { label: 'Tax period', value: `${formatDay(fromDate)} to ${formatDay(toDate)}` },
+                    {
+                        label: 'Invoices covered',
+                        value: documentRange.count
+                            ? `${documentRange.count} (${documentRange.from} to ${documentRange.to})`
+                            : 'None issued in this period',
+                    },
+                ]),
+                columns: [
+                    { header: 'HSN / SAC', key: 'hsnCode', width: 12 },
+                    { header: 'Description', key: 'description', width: 34 },
+                    { header: 'UQC', key: 'uqc', width: 8 },
+                    { header: 'Total Qty', key: 'totalQuantity', width: 11, type: 'number' },
+                    { header: 'Taxable Value', key: 'taxableValue', width: 16, type: 'currency' },
+                    { header: 'CGST Rate', key: 'cgstRate', width: 11, type: 'percent' },
+                    { header: 'CGST Amount', key: 'cgstAmount', width: 14, type: 'currency' },
+                    { header: 'SGST Rate', key: 'sgstRate', width: 11, type: 'percent' },
+                    { header: 'SGST Amount', key: 'sgstAmount', width: 14, type: 'currency' },
+                    { header: 'IGST Amount', key: 'igstAmount', width: 14, type: 'currency' },
+                    { header: 'Total Tax', key: 'totalTax', width: 14, type: 'currency' },
+                    { header: 'Total Value', key: 'totalValue', width: 15, type: 'currency' },
+                ],
+                rows: hsnRows as unknown as Array<Record<string, unknown>>,
+                totals: {
+                    hsnCode: 'TOTAL',
+                    taxableValue: totals.taxableValue,
+                    cgstAmount: totals.totalCGST,
+                    sgstAmount: totals.totalSGST,
+                    igstAmount: totals.totalIGST,
+                    totalTax: totals.totalTax,
+                    totalValue: totals.totalValue,
+                },
+                notes: [
+                    'Item prices are tax-exclusive: the taxable value is the amount charged and GST is added on top.',
+                    'Covers delivered orders only. Reconcile with the books of account before filing.',
+                ],
+            };
+            return reportResponse(
+                spec,
+                `HSN_Summary_${fromDate.toISOString().slice(0, 10)}_${toDate.toISOString().slice(0, 10)}`,
+                format
+            );
         }
 
         if (format === 'pdf') {
@@ -144,22 +188,6 @@ export async function GET(request: Request) {
         console.error('HSN summary error:', error);
         return NextResponse.json({ success: false, error: error?.message || 'Failed to generate HSN summary' }, { status: 500 });
     }
-}
-
-function generateHSNCSV(rows: HSNRow[], totals: any, from: Date, to: Date, docs?: { from: string; to: string; count: number }): string {
-    const lines: string[] = [];
-    lines.push(`"HSN Summary Report (for GSTR-1 Table 12)"`);
-    lines.push(`"Period: ${fmtDate(from)} to ${fmtDate(to)}"`);
-    lines.push(`"Invoices covered: ${docs?.count || 0}${docs?.from ? ` (${docs.from} to ${docs.to})` : ''}"`);
-    lines.push(`"Generated: ${fmtDate(new Date())}"`);
-    lines.push('');
-    lines.push('"HSN Code","Description","UQC","Total Qty","Total Value (₹)","Taxable Value (₹)","CGST Rate","CGST Amount (₹)","SGST Rate","SGST Amount (₹)","IGST Rate","IGST Amount (₹)","Total Tax (₹)","Cess (₹)"');
-    rows.forEach(r => {
-        lines.push(`"${r.hsnCode}","${r.description}","${r.uqc}",${r.totalQuantity},${r.totalValue.toFixed(2)},${r.taxableValue.toFixed(2)},"${r.cgstRate}%",${r.cgstAmount.toFixed(2)},"${r.sgstRate}%",${r.sgstAmount.toFixed(2)},"${r.igstRate}%",${r.igstAmount.toFixed(2)},${r.totalTax.toFixed(2)},${r.cessAmount.toFixed(2)}`);
-    });
-    lines.push('');
-    lines.push(`"TOTALS","","","",${totals.totalValue.toFixed(2)},${totals.taxableValue.toFixed(2)},"",${totals.totalCGST.toFixed(2)},"",${totals.totalSGST.toFixed(2)},"",${totals.totalIGST.toFixed(2)},${totals.totalTax.toFixed(2)},${totals.totalCess.toFixed(2)}`);
-    return lines.join('\n');
 }
 
 function generateHSNPDF(rows: HSNRow[], totals: any, from: Date, to: Date): Buffer {

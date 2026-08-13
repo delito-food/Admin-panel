@@ -41,7 +41,7 @@ import {
     Legend
 } from 'recharts';
 import { useApi, Order } from '@/hooks/useApi';
-import { authenticatedFetch } from '@/lib/api-client';
+import { authenticatedFetch, downloadAuthenticatedFile } from '@/lib/api-client';
 
 const CHART_COLORS = ['#F4511E', '#FF9904', '#F6D59F', '#10B981', '#E9190C'];
 
@@ -237,24 +237,18 @@ export default function OrdersPage() {
                     <button
                         onClick={async () => {
                             try {
-                                const res = await authenticatedFetch('/api/orders?format=csv&limit=5000');
-                                if (res.ok) {
-                                    const blob = await res.blob();
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = 'orders-export.csv';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    document.body.removeChild(a);
-                                    URL.revokeObjectURL(url);
-                                }
-                            } catch { /* silent */ }
+                                await downloadAuthenticatedFile(
+                                    '/api/orders?format=xlsx&limit=5000',
+                                    `Orders_${new Date().toISOString().slice(0, 10)}.xlsx`
+                                );
+                            } catch (err) {
+                                alert(err instanceof Error ? err.message : 'Export failed');
+                            }
                         }}
                         className="btn btn-outline"
                     >
                         <Download size={16} />
-                        Export CSV
+                        Export Excel
                     </button>
                     <button onClick={handleRefresh} disabled={refreshing} className="btn btn-outline" style={{ opacity: refreshing ? 0.6 : 1 }}>
                         <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />

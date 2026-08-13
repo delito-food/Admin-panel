@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
+import { PLATFORM } from '@/lib/invoice-constants';
+import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
+import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -132,7 +135,50 @@ export async function GET(request: Request) {
                 totalNetAfterTDS: roundTo2(rows.reduce((s, r) => s + r.netAfterTDS, 0)),
             };
 
-            if (format === 'csv') return respondCSV(generateVendorTDSCSV(rows, totals, section, quarter, fromDate, toDate), `TDS_${section}`);
+            if (format === 'csv' || format === 'xlsx') {
+                const spec: XlsxSheetSpec = {
+                    sheetName: `TDS ${section}`,
+                    title: `TDS Statement — Section ${section}`,
+                    subtitle: section === '194O'
+                        ? 'TDS on e-commerce participant payments (0.1% of gross sales)'
+                        : 'TDS on commission and brokerage',
+                    meta: platformMeta([
+                        { label: 'Deductor', value: PLATFORM.legalName },
+                        { label: 'Quarter', value: quarter || 'Custom range' },
+                        { label: 'Period', value: `${formatDay(fromDate)} to ${formatDay(toDate)}` },
+                        { label: 'TDS rate', value: `${TDS_RATE}%` },
+                    ]),
+                    columns: [
+                        { header: 'Restaurant', key: 'vendorName', width: 28 },
+                        { header: 'PAN', key: 'pan', width: 14 },
+                        { header: 'GSTIN', key: 'gstin', width: 20 },
+                        { header: 'Orders', key: 'totalOrders', width: 10, type: 'number' },
+                        { header: 'Gross Sales', key: 'totalGrossSales', width: 15, type: 'currency' },
+                        { header: 'Commission', key: 'commission', width: 14, type: 'currency' },
+                        { header: 'GST on Commission', key: 'gstOnCommission', width: 17, type: 'currency' },
+                        { header: 'Net Payable', key: 'netPayable', width: 14, type: 'currency' },
+                        { header: 'TDS Rate', key: 'tdsRate', width: 10, type: 'percent' },
+                        { header: 'TDS Deducted', key: 'tdsAmount', width: 14, type: 'currency' },
+                        { header: 'Net After TDS', key: 'netAfterTDS', width: 15, type: 'currency' },
+                    ],
+                    rows: rows as unknown as Array<Record<string, unknown>>,
+                    totals: {
+                        vendorName: 'TOTAL',
+                        totalOrders: totals.totalOrders,
+                        totalGrossSales: totals.totalGrossSales,
+                        commission: totals.totalCommission,
+                        gstOnCommission: totals.totalGstOnCommission,
+                        netPayable: totals.totalNetPayable,
+                        tdsAmount: totals.totalTDS,
+                        netAfterTDS: totals.totalNetAfterTDS,
+                    },
+                    notes: [
+                        'Rows without a PAN attract a higher deduction rate — collect the PAN before filing.',
+                        'System-generated statement. Verify against the challans actually deposited.',
+                    ],
+                };
+                return reportResponse(spec, `TDS_${section}_${quarter || 'custom'}`, format);
+            }
             if (format === 'pdf') return respondPDF(generateVendorTDSPDF(rows, totals, section, quarter, fromDate, toDate), `TDS_${section}`);
 
             return NextResponse.json({ success: true, data: { section, quarter, from: fromDate.toISOString(), to: toDate.toISOString(), tdsRate: TDS_RATE, vendors: rows, totals } });
@@ -180,7 +226,42 @@ export async function GET(request: Request) {
                 totalNetAfterTDS: roundTo2(rows.reduce((s, r) => s + r.netAfterTDS, 0)),
             };
 
-            if (format === 'csv') return respondCSV(generateDeliveryTDSCSV(rows, totals, quarter, fromDate, toDate), 'TDS_194C');
+            if (format === 'csv' || format === 'xlsx') {
+                const spec: XlsxSheetSpec = {
+                    sheetName: 'TDS 194C',
+                    title: 'TDS Statement — Section 194C',
+                    subtitle: 'TDS on payments to delivery partners (contractors)',
+                    meta: platformMeta([
+                        { label: 'Deductor', value: PLATFORM.legalName },
+                        { label: 'Quarter', value: quarter || 'Custom range' },
+                        { label: 'Period', value: `${formatDay(fromDate)} to ${formatDay(toDate)}` },
+                        { label: 'TDS rate', value: `${TDS_RATE}%` },
+                    ]),
+                    columns: [
+                        { header: 'Delivery Partner', key: 'name', width: 26 },
+                        { header: 'PAN', key: 'pan', width: 14 },
+                        { header: 'Phone', key: 'phone', width: 15 },
+                        { header: 'Deliveries', key: 'totalDeliveries', width: 12, type: 'number' },
+                        { header: 'Total Earnings', key: 'totalEarnings', width: 15, type: 'currency' },
+                        { header: 'TDS Rate', key: 'tdsRate', width: 10, type: 'percent' },
+                        { header: 'TDS Deducted', key: 'tdsAmount', width: 14, type: 'currency' },
+                        { header: 'Net After TDS', key: 'netAfterTDS', width: 15, type: 'currency' },
+                    ],
+                    rows: rows as unknown as Array<Record<string, unknown>>,
+                    totals: {
+                        name: 'TOTAL',
+                        totalDeliveries: totals.totalDeliveries,
+                        totalEarnings: totals.totalEarnings,
+                        tdsAmount: totals.totalTDS,
+                        netAfterTDS: totals.totalNetAfterTDS,
+                    },
+                    notes: [
+                        'Rows without a PAN attract a higher deduction rate — collect the PAN before filing.',
+                        'System-generated statement. Verify against the challans actually deposited.',
+                    ],
+                };
+                return reportResponse(spec, `TDS_194C_${quarter || 'custom'}`, format);
+            }
             if (format === 'pdf') return respondPDF(generateDeliveryTDSPDF(rows, totals, quarter, fromDate, toDate), 'TDS_194C');
 
             return NextResponse.json({ success: true, data: { section: '194C', quarter, from: fromDate.toISOString(), to: toDate.toISOString(), tdsRate: TDS_RATE, deliveryPartners: rows, totals } });
@@ -195,17 +276,6 @@ export async function GET(request: Request) {
 
 // ── Response helpers ──
 
-function respondCSV(csv: string, name: string) {
-    // UTF-8 BOM for Excel compatibility
-    const bom = '\uFEFF';
-    return new Response(bom + csv, {
-        headers: {
-            'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': `attachment; filename="${name}_${new Date().toISOString().slice(0, 10)}.csv"`,
-        },
-    });
-}
-
 function respondPDF(buf: Buffer, name: string) {
     return new Response(new Uint8Array(buf), {
         headers: {
@@ -216,45 +286,9 @@ function respondPDF(buf: Buffer, name: string) {
     });
 }
 
-// ── CSV generators (clean formatting) ──
+// ── PDF helpers ──
 
 function fmtDate(d: Date) { return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
-
-function generateVendorTDSCSV(rows: TDSVendorRow[], totals: any, section: string, quarter: string, from: Date, to: Date): string {
-    const lines: string[] = [];
-    lines.push(`"TDS Report - Section ${section}"`);
-    lines.push(`"Period: ${fmtDate(from)} to ${fmtDate(to)} (${quarter})"`);
-    lines.push(`"Generated: ${fmtDate(new Date())}"`);
-    lines.push('');
-    lines.push('"Vendor ID","Vendor Name","PAN","GSTIN","Gross Sales (₹)","Orders","Commission (₹)","GST on Comm (₹)","Net Payable (₹)","TDS Rate","TDS Amount (₹)","Net After TDS (₹)"');
-
-    rows.forEach(r => {
-        lines.push(`"${r.vendorId}","${r.vendorName}","${r.pan || 'N/A'}","${r.gstin || 'N/A'}",${r.totalGrossSales.toFixed(2)},${r.totalOrders},${r.commission.toFixed(2)},${r.gstOnCommission.toFixed(2)},${r.netPayable.toFixed(2)},"${r.tdsRate}%",${r.tdsAmount.toFixed(2)},${r.netAfterTDS.toFixed(2)}`);
-    });
-
-    lines.push('');
-    lines.push(`"TOTALS","","","",${totals.totalGrossSales.toFixed(2)},${totals.totalOrders},${totals.totalCommission.toFixed(2)},${totals.totalGstOnCommission.toFixed(2)},${totals.totalNetPayable.toFixed(2)},"",${totals.totalTDS.toFixed(2)},${totals.totalNetAfterTDS.toFixed(2)}`);
-    return lines.join('\n');
-}
-
-function generateDeliveryTDSCSV(rows: TDSDeliveryRow[], totals: any, quarter: string, from: Date, to: Date): string {
-    const lines: string[] = [];
-    lines.push(`"TDS Report - Section 194C (Delivery Partners)"`);
-    lines.push(`"Period: ${fmtDate(from)} to ${fmtDate(to)} (${quarter})"`);
-    lines.push(`"Generated: ${fmtDate(new Date())}"`);
-    lines.push('');
-    lines.push('"Partner ID","Name","PAN","Phone","Deliveries","Earnings (₹)","TDS Rate","TDS Amount (₹)","Net After TDS (₹)"');
-
-    rows.forEach(r => {
-        lines.push(`"${r.deliveryPersonId}","${r.name}","${r.pan || 'N/A'}","${r.phone}",${r.totalDeliveries},${r.totalEarnings.toFixed(2)},"${r.tdsRate}%",${r.tdsAmount.toFixed(2)},${r.netAfterTDS.toFixed(2)}`);
-    });
-
-    lines.push('');
-    lines.push(`"TOTALS","","","",${totals.totalDeliveries},${totals.totalEarnings.toFixed(2)},"",${totals.totalTDS.toFixed(2)},${totals.totalNetAfterTDS.toFixed(2)}`);
-    return lines.join('\n');
-}
-
-// ── PDF generators ──
 
 function generateVendorTDSPDF(rows: TDSVendorRow[], totals: any, section: string, quarter: string, from: Date, to: Date): Buffer {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });

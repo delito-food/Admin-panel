@@ -41,14 +41,14 @@ export default function HSNSummaryPage() {
     };
 
     const handleDownloadCSV = async () => {
-        let url = '/api/reports/hsn?format=csv';
+        let url = '/api/reports/hsn?format=xlsx';
         if (dateFrom) url += `&from=${dateFrom}`;
         if (dateTo) url += `&to=${dateTo}`;
         // /api/* needs a bearer token — a plain window.open() navigation cannot carry it
         try {
-            await downloadAuthenticatedFile(url, 'HSN_Summary_Report.csv');
+            await downloadAuthenticatedFile(url, 'HSN_Summary_Report.xlsx');
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'CSV download failed');
+            alert(err instanceof Error ? err.message : 'Excel download failed');
         }
     };
 

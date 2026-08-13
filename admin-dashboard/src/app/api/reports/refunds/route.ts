@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
+import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
+import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 
 export async function GET(request: Request) {
     try {
@@ -171,6 +173,55 @@ export async function GET(request: Request) {
         // Sort entries by date (newest first)
         refundEntries.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
         const monthlyData = Object.values(monthlyRefunds).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+
+        // ── File export (styled .xlsx by default, CSV on request) ──
+        const format = searchParams.get('format');
+        if (format === 'csv' || format === 'xlsx') {
+            const spec: XlsxSheetSpec = {
+                sheetName: 'Refunds',
+                title: 'Cancellation & Refund Register',
+                subtitle: 'Cancelled orders and the refunds raised against them',
+                meta: platformMeta([
+                    {
+                        label: 'Period',
+                        value: startDate || endDate
+                            ? `${startDate ? formatDay(startDate) : 'Beginning'} to ${endDate ? formatDay(endDate) : 'Date'}`
+                            : 'All time',
+                    },
+                    { label: 'Status filter', value: statusFilter || 'All' },
+                    { label: 'Cancellations', value: String(summary.totalRefunds) },
+                ]),
+                columns: [
+                    { header: 'Invoice No.', key: 'invoiceNumber', width: 20 },
+                    { header: 'Order ID', key: 'orderId', width: 24 },
+                    { header: 'Customer', key: 'customerName', width: 22 },
+                    { header: 'Restaurant', key: 'vendorName', width: 24 },
+                    { header: 'Order Date', key: 'orderDateLabel', width: 14 },
+                    { header: 'Refund Date', key: 'refundDateLabel', width: 14 },
+                    { header: 'Order Total', key: 'orderTotal', width: 14, type: 'currency' },
+                    { header: 'Refund Amount', key: 'refundAmount', width: 15, type: 'currency' },
+                    { header: 'Payment Mode', key: 'paymentMode', width: 14 },
+                    { header: 'Cancelled By', key: 'cancelledBy', width: 14 },
+                    { header: 'Reason', key: 'refundReason', width: 34 },
+                    { header: 'Refund Status', key: 'refundStatus', width: 14 },
+                ],
+                rows: refundEntries.map(e => ({
+                    ...e,
+                    orderDateLabel: formatDay(e.orderDate),
+                    refundDateLabel: formatDay(e.refundDate),
+                })) as unknown as Array<Record<string, unknown>>,
+                totals: {
+                    invoiceNumber: 'TOTAL',
+                    orderTotal: Math.round(refundEntries.reduce((s, e) => s + (e.orderTotal || 0), 0) * 100) / 100,
+                    refundAmount: Math.round(summary.totalRefundAmount * 100) / 100,
+                },
+                notes: [
+                    'A credit note should be issued against the original tax invoice for every completed refund.',
+                    'COD cancellations carry no refund outflow — they are listed for completeness.',
+                ],
+            };
+            return reportResponse(spec, `Refunds_${new Date().toISOString().slice(0, 10)}`, format);
+        }
 
         return NextResponse.json({
             success: true,

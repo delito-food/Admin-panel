@@ -12,6 +12,7 @@ import {
     ResponsiveContainer, Legend, PieChart, Pie, Cell
 } from 'recharts';
 import { useApi } from '@/hooks/useApi';
+import { downloadAuthenticatedFile } from '@/lib/api-client';
 
 interface RefundEntry {
     invoiceNumber?: string;
@@ -165,25 +166,19 @@ export default function RefundReportPage() {
         ].filter(d => d.value > 0);
     }, [data]);
 
-    const downloadCSV = () => {
-        if (!data?.entries) return;
-        const headers = ['Invoice No.', 'Order ID', 'Customer', 'Vendor', 'Order Date', 'Refund Date', 'Order Total', 'Refund Amount', 'Payment Mode', 'Cancelled By', 'Cancellation Reason', 'Refund Status'];
-        const rows = data.entries.map(e => [
-            e.invoiceNumber || '', e.orderId, e.customerName, e.vendorName,
-            formatDate(e.orderDate), formatDate(e.refundDate),
-            e.orderTotal.toFixed(2), e.refundAmount.toFixed(2),
-            e.paymentMode, e.cancelledBy,
-            `"${(e.cancellationReason || '').replace(/"/g, "'")}"`,
-            e.refundStatus,
-        ]);
-        const csvContent = '\ufeff' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `refund-report-${new Date().toISOString().split('T')[0]}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+    const downloadCSV = async () => {
+        const params = new URLSearchParams();
+        if (appliedStart) params.set('startDate', appliedStart);
+        if (appliedEnd) params.set('endDate', appliedEnd);
+        params.set('format', 'xlsx');
+        try {
+            await downloadAuthenticatedFile(
+                `/api/reports/refunds?${params.toString()}`,
+                `Refunds_${new Date().toISOString().split('T')[0]}.xlsx`
+            );
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Export failed');
+        }
     };
 
     const getStatusBadge = (status: string) => {
@@ -299,7 +294,7 @@ export default function RefundReportPage() {
                     </div>
 
                     <button onClick={downloadCSV} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)', cursor: 'pointer', fontWeight: 500, fontSize: '0.875rem' }}>
-                        <Download size={16} /> Export CSV
+                        <Download size={16} /> Export Excel
                     </button>
                     <button onClick={handleRefresh} disabled={refreshing} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, background: 'var(--primary)', color: 'white', border: 'none', cursor: refreshing ? 'not-allowed' : 'pointer', opacity: refreshing ? 0.6 : 1, fontWeight: 500, fontSize: '0.875rem' }}>
                         <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />

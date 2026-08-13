@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
 import { PLATFORM, GST_RATES, HSN_CODES } from '@/lib/invoice-constants';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
+import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
+import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 
 /**
  * GST report — structured to mirror the GSTR-1 / GSTR-3B return layout.
@@ -68,6 +70,7 @@ interface GSTEntry {
 }
 
 interface PeriodRow extends Rated {
+    [key: string]: unknown;
     month: string;
     monthKey: string;
     ordersCount: number;
@@ -90,10 +93,6 @@ interface PeriodRow extends Rated {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-
-function csvEscape(v: unknown): string {
-    return `"${String(v ?? '').replace(/"/g, '""')}"`;
-}
 
 export async function GET(request: Request) {
     try {
@@ -508,88 +507,207 @@ export async function GET(request: Request) {
             basisOfPreparation: 'Accrual — delivered/completed orders only. Values in INR.',
         };
 
-        // ── CSV export (per section, Excel-friendly) ──
-        if (format === 'csv') {
-            const lines: string[] = [];
-            const head = (title: string) => {
-                lines.push(csvEscape(`${PLATFORM.legalName} — ${title}`));
-                lines.push(`${csvEscape('GSTIN')},${csvEscape(meta.gstin)}`);
-                lines.push(`${csvEscape('Period')},${csvEscape(`${meta.periodFrom || 'Beginning'} to ${meta.periodTo || 'Date'}`)}`);
-                lines.push(`${csvEscape('Place of supply')},${csvEscape(meta.placeOfSupply)}`);
-                lines.push('');
-            };
+        // ── File export (styled .xlsx by default, CSV on request) ──
+        if (format === 'csv' || format === 'xlsx') {
+            const periodLabel = `${meta.periodFrom ? formatDay(meta.periodFrom) : 'Beginning'} to ${meta.periodTo ? formatDay(meta.periodTo) : 'Date'}`;
+            const commonMeta = platformMeta([
+                { label: 'Place of supply', value: PLACE_OF_SUPPLY },
+                { label: 'Tax period', value: periodLabel },
+                { label: 'Invoices in period', value: `${documentSummary.totalIssued} issued, ${documentSummary.cancelled} cancelled` },
+            ]);
+            const basis = [
+                'Prepared on an accrual basis from delivered/completed orders only.',
+                'Invoice discounts reduce the taxable value (sec. 15(3)(a)); post-supply discounts (coins, promo codes, HungerGame rewards) are reported separately and do not.',
+                'Figures are system-generated and should be reconciled with the books of account before filing.',
+            ];
+
+            let spec: XlsxSheetSpec;
 
             if (section === 'b2cs') {
-                head('GSTR-1 Table 7 — B2C (Others)');
-                lines.push(['Place of Supply', 'Rate (%)', 'Taxable Value', 'IGST', 'CGST', 'SGST', 'Invoices'].map(csvEscape).join(','));
-                b2cs.forEach(b => lines.push([
-                    csvEscape(PLACE_OF_SUPPLY), b.rate, b.taxableValue.toFixed(2), b.igst.toFixed(2),
-                    b.cgst.toFixed(2), b.sgst.toFixed(2), b.invoiceCount,
-                ].join(',')));
+                spec = {
+                    sheetName: 'GSTR-1 Table 7',
+                    title: 'GSTR-1 Table 7 — B2C (Others)',
+                    subtitle: 'Rate-wise summary of supplies to unregistered persons',
+                    meta: commonMeta,
+                    columns: [
+                        { header: 'Place of Supply', key: 'pos', width: 22 },
+                        { header: 'Rate', key: 'rate', width: 10, type: 'percent' },
+                        { header: 'Taxable Value', key: 'taxableValue', width: 16, type: 'currency' },
+                        { header: 'IGST', key: 'igst', width: 14, type: 'currency' },
+                        { header: 'CGST', key: 'cgst', width: 14, type: 'currency' },
+                        { header: 'SGST', key: 'sgst', width: 14, type: 'currency' },
+                        { header: 'Invoices', key: 'invoiceCount', width: 11, type: 'number' },
+                    ],
+                    rows: b2cs.map(b => ({ ...b, pos: PLACE_OF_SUPPLY })),
+                    totals: {
+                        pos: 'TOTAL',
+                        taxableValue: summary.totalTaxableValue,
+                        igst: 0,
+                        cgst: summary.totalCgst,
+                        sgst: summary.totalSgst,
+                        invoiceCount: summary.totalOrders,
+                    },
+                    notes: basis,
+                };
             } else if (section === 'hsn') {
-                head('GSTR-1 Table 12 — HSN-wise summary of outward supplies');
-                lines.push(['HSN', 'Description', 'UQC', 'Quantity', 'Rate (%)', 'Taxable Value', 'IGST', 'CGST', 'SGST', 'Total Value'].map(csvEscape).join(','));
-                hsnSummary.forEach(h => lines.push([
-                    csvEscape(h.hsn), csvEscape(h.description), csvEscape(h.uqc), h.quantity,
-                    h.rate, h.taxableValue.toFixed(2), h.igst.toFixed(2), h.cgst.toFixed(2),
-                    h.sgst.toFixed(2), h.total.toFixed(2),
-                ].join(',')));
+                spec = {
+                    sheetName: 'GSTR-1 Table 12',
+                    title: 'GSTR-1 Table 12 — HSN-wise summary of outward supplies',
+                    subtitle: 'Consolidated by HSN/SAC and tax rate',
+                    meta: commonMeta,
+                    columns: [
+                        { header: 'HSN / SAC', key: 'hsn', width: 12 },
+                        { header: 'Description', key: 'description', width: 34 },
+                        { header: 'UQC', key: 'uqc', width: 8 },
+                        { header: 'Quantity', key: 'quantity', width: 11, type: 'number' },
+                        { header: 'Rate', key: 'rate', width: 9, type: 'percent' },
+                        { header: 'Taxable Value', key: 'taxableValue', width: 16, type: 'currency' },
+                        { header: 'IGST', key: 'igst', width: 13, type: 'currency' },
+                        { header: 'CGST', key: 'cgst', width: 13, type: 'currency' },
+                        { header: 'SGST', key: 'sgst', width: 13, type: 'currency' },
+                        { header: 'Total Value', key: 'total', width: 15, type: 'currency' },
+                    ],
+                    rows: hsnSummary,
+                    totals: {
+                        hsn: 'TOTAL',
+                        taxableValue: summary.totalTaxableValue,
+                        igst: 0,
+                        cgst: summary.totalCgst,
+                        sgst: summary.totalSgst,
+                        total: summary.totalInvoiceValue,
+                    },
+                    notes: basis,
+                };
             } else if (section === 'monthly') {
-                head('Tax period summary');
-                lines.push(['Tax Period', 'Invoices', 'Gross Sales', 'Discounts', 'Food Taxable', 'Delivery Taxable', 'Platform Fee Taxable', 'Commission Taxable', 'Total Taxable Value', 'CGST', 'SGST', 'Total GST', 'Invoice Value'].map(csvEscape).join(','));
-                monthlyData.forEach(m => lines.push([
-                    csvEscape(m.month), m.ordersCount, m.grossSales.toFixed(2), m.totalDiscount.toFixed(2),
-                    m.foodTaxable.toFixed(2), m.deliveryTaxable.toFixed(2), m.platformTaxable.toFixed(2),
-                    m.commissionTaxable.toFixed(2), m.taxableValue.toFixed(2), m.cgst.toFixed(2),
-                    m.sgst.toFixed(2), m.totalGst.toFixed(2), m.invoiceValue.toFixed(2),
-                ].join(',')));
+                spec = {
+                    sheetName: 'Tax periods',
+                    title: 'GST summary by tax period',
+                    subtitle: 'Month-wise outward supplies and tax payable',
+                    meta: commonMeta,
+                    columns: [
+                        { header: 'Tax Period', key: 'month', width: 18 },
+                        { header: 'Invoices', key: 'ordersCount', width: 10, type: 'number' },
+                        { header: 'Gross Sales', key: 'grossSales', width: 15, type: 'currency' },
+                        { header: 'Discounts', key: 'totalDiscount', width: 14, type: 'currency' },
+                        { header: 'Food Taxable', key: 'foodTaxable', width: 15, type: 'currency' },
+                        { header: 'Delivery Taxable', key: 'deliveryTaxable', width: 16, type: 'currency' },
+                        { header: 'Platform Fee Taxable', key: 'platformTaxable', width: 18, type: 'currency' },
+                        { header: 'Commission Taxable', key: 'commissionTaxable', width: 18, type: 'currency' },
+                        { header: 'Total Taxable Value', key: 'taxableValue', width: 18, type: 'currency' },
+                        { header: 'CGST', key: 'cgst', width: 13, type: 'currency' },
+                        { header: 'SGST', key: 'sgst', width: 13, type: 'currency' },
+                        { header: 'Total GST', key: 'totalGst', width: 14, type: 'currency' },
+                        { header: 'Invoice Value', key: 'invoiceValue', width: 15, type: 'currency' },
+                    ],
+                    rows: monthlyData,
+                    totals: {
+                        month: 'TOTAL',
+                        ordersCount: summary.totalOrders,
+                        grossSales: summary.grossSales,
+                        totalDiscount: summary.totalDiscount,
+                        foodTaxable: summary.foodTaxable,
+                        deliveryTaxable: summary.deliveryTaxable,
+                        platformTaxable: summary.platformTaxable,
+                        commissionTaxable: summary.commissionTaxable,
+                        taxableValue: summary.totalTaxableValue,
+                        cgst: summary.totalCgst,
+                        sgst: summary.totalSgst,
+                        totalGst: summary.totalGstCollected,
+                        invoiceValue: summary.totalInvoiceValue,
+                    },
+                    notes: basis,
+                };
             } else if (section === 'vendor') {
-                head('Supplier-wise summary');
-                lines.push(['Restaurant', 'GSTIN', 'Invoices', 'Gross Sales', 'Discounts', 'Food Taxable', 'Delivery Taxable', 'Commission', 'Total Taxable Value', 'CGST', 'SGST', 'Total GST'].map(csvEscape).join(','));
-                vendorData.forEach(v => lines.push([
-                    csvEscape(v.vendorName), csvEscape(v.gstin || 'Unregistered'), v.ordersCount,
-                    v.grossSales.toFixed(2), v.totalDiscount.toFixed(2), v.foodTaxable.toFixed(2),
-                    v.deliveryTaxable.toFixed(2), v.commissionTaxable.toFixed(2), v.taxableValue.toFixed(2),
-                    v.cgst.toFixed(2), v.sgst.toFixed(2), v.totalGst.toFixed(2),
-                ].join(',')));
+                spec = {
+                    sheetName: 'By restaurant',
+                    title: 'GST summary by restaurant',
+                    subtitle: 'Supplier-wise outward supplies and commission',
+                    meta: commonMeta,
+                    columns: [
+                        { header: 'Restaurant', key: 'vendorName', width: 28 },
+                        { header: 'GSTIN', key: 'gstinLabel', width: 20 },
+                        { header: 'Invoices', key: 'ordersCount', width: 10, type: 'number' },
+                        { header: 'Gross Sales', key: 'grossSales', width: 15, type: 'currency' },
+                        { header: 'Discounts', key: 'totalDiscount', width: 14, type: 'currency' },
+                        { header: 'Food Taxable', key: 'foodTaxable', width: 15, type: 'currency' },
+                        { header: 'Delivery Taxable', key: 'deliveryTaxable', width: 16, type: 'currency' },
+                        { header: 'Commission', key: 'commissionTaxable', width: 14, type: 'currency' },
+                        { header: 'Total Taxable Value', key: 'taxableValue', width: 18, type: 'currency' },
+                        { header: 'CGST', key: 'cgst', width: 13, type: 'currency' },
+                        { header: 'SGST', key: 'sgst', width: 13, type: 'currency' },
+                        { header: 'Total GST', key: 'totalGst', width: 14, type: 'currency' },
+                    ],
+                    rows: vendorData.map(v => ({ ...v, gstinLabel: v.gstin || 'Unregistered' })),
+                    totals: {
+                        vendorName: 'TOTAL',
+                        ordersCount: summary.totalOrders,
+                        grossSales: summary.grossSales,
+                        totalDiscount: summary.totalDiscount,
+                        foodTaxable: summary.foodTaxable,
+                        deliveryTaxable: summary.deliveryTaxable,
+                        commissionTaxable: summary.commissionTaxable,
+                        taxableValue: summary.totalTaxableValue,
+                        cgst: summary.totalCgst,
+                        sgst: summary.totalSgst,
+                        totalGst: summary.totalGstCollected,
+                    },
+                    notes: basis,
+                };
             } else {
-                head('Invoice-wise outward supply register');
-                lines.push([
-                    'Invoice No.', 'Invoice Date', 'Order ID', 'Restaurant', 'Place of Supply', 'Payment Mode',
-                    'Gross Item Total', 'Item Discount', 'Post-supply Discount', 'Total Discount',
-                    'Food Taxable (5%)', 'Delivery Taxable (18%)', 'Platform Fee Taxable (18%)',
-                    'Commission Taxable (18%)', 'Total Taxable Value', 'CGST', 'SGST', 'IGST',
-                    'Total GST', 'Invoice Value',
-                ].map(csvEscape).join(','));
-                gstEntries.forEach(e => lines.push([
-                    csvEscape(e.invoiceNumber),
-                    csvEscape(new Date(e.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })),
-                    csvEscape(e.orderId), csvEscape(e.vendorName), csvEscape(e.placeOfSupply), csvEscape(e.paymentMode),
-                    e.grossItemTotal.toFixed(2), e.itemDiscount.toFixed(2), e.postSupplyDiscount.toFixed(2), e.totalDiscount.toFixed(2),
-                    e.foodTaxable.toFixed(2), e.deliveryTaxable.toFixed(2), e.platformTaxable.toFixed(2),
-                    e.commissionTaxable.toFixed(2), e.taxableValue.toFixed(2), e.cgst.toFixed(2),
-                    e.sgst.toFixed(2), e.igst.toFixed(2), e.totalGst.toFixed(2), e.invoiceValue.toFixed(2),
-                ].join(',')));
-                lines.push('');
-                lines.push([
-                    csvEscape('TOTAL'), '', '', '', '', '',
-                    summary.grossSales.toFixed(2), summary.totalItemDiscount.toFixed(2),
-                    summary.totalPostSupplyDiscount.toFixed(2), summary.totalDiscount.toFixed(2),
-                    summary.foodTaxable.toFixed(2), summary.deliveryTaxable.toFixed(2),
-                    summary.platformTaxable.toFixed(2), summary.commissionTaxable.toFixed(2),
-                    summary.totalTaxableValue.toFixed(2), summary.totalCgst.toFixed(2),
-                    summary.totalSgst.toFixed(2), '0.00', summary.totalGstCollected.toFixed(2),
-                    summary.totalInvoiceValue.toFixed(2),
-                ].join(','));
+                spec = {
+                    sheetName: 'Invoice register',
+                    title: 'Invoice-wise outward supply register',
+                    subtitle: 'Every tax invoice issued in the period, with its taxable value and tax',
+                    meta: commonMeta,
+                    columns: [
+                        { header: 'Invoice No.', key: 'invoiceNumber', width: 20 },
+                        { header: 'Invoice Date', key: 'invoiceDate', width: 14 },
+                        { header: 'Order ID', key: 'orderId', width: 24 },
+                        { header: 'Restaurant', key: 'vendorName', width: 26 },
+                        { header: 'Place of Supply', key: 'placeOfSupply', width: 18 },
+                        { header: 'Payment Mode', key: 'paymentMode', width: 14 },
+                        { header: 'Gross Item Total', key: 'grossItemTotal', width: 16, type: 'currency' },
+                        { header: 'Item Discount', key: 'itemDiscount', width: 14, type: 'currency' },
+                        { header: 'Post-supply Discount', key: 'postSupplyDiscount', width: 18, type: 'currency' },
+                        { header: 'Total Discount', key: 'totalDiscount', width: 15, type: 'currency' },
+                        { header: 'Food Taxable (5%)', key: 'foodTaxable', width: 16, type: 'currency' },
+                        { header: 'Delivery Taxable (18%)', key: 'deliveryTaxable', width: 18, type: 'currency' },
+                        { header: 'Platform Fee Taxable (18%)', key: 'platformTaxable', width: 20, type: 'currency' },
+                        { header: 'Commission Taxable (18%)', key: 'commissionTaxable', width: 20, type: 'currency' },
+                        { header: 'Total Taxable Value', key: 'taxableValue', width: 18, type: 'currency' },
+                        { header: 'CGST', key: 'cgst', width: 13, type: 'currency' },
+                        { header: 'SGST', key: 'sgst', width: 13, type: 'currency' },
+                        { header: 'IGST', key: 'igst', width: 13, type: 'currency' },
+                        { header: 'Total GST', key: 'totalGst', width: 14, type: 'currency' },
+                        { header: 'Invoice Value', key: 'invoiceValue', width: 15, type: 'currency' },
+                    ],
+                    rows: gstEntries.map(e => ({ ...e, invoiceDate: formatDay(e.orderDate) })),
+                    totals: {
+                        invoiceNumber: 'TOTAL',
+                        grossItemTotal: summary.grossSales,
+                        itemDiscount: summary.totalItemDiscount,
+                        postSupplyDiscount: summary.totalPostSupplyDiscount,
+                        totalDiscount: summary.totalDiscount,
+                        foodTaxable: summary.foodTaxable,
+                        deliveryTaxable: summary.deliveryTaxable,
+                        platformTaxable: summary.platformTaxable,
+                        commissionTaxable: summary.commissionTaxable,
+                        taxableValue: summary.totalTaxableValue,
+                        cgst: summary.totalCgst,
+                        sgst: summary.totalSgst,
+                        igst: 0,
+                        totalGst: summary.totalGstCollected,
+                        invoiceValue: summary.totalInvoiceValue,
+                    },
+                    notes: basis,
+                };
             }
 
-            const filename = `GST-${section}-${meta.periodFrom || 'all'}_${meta.periodTo || 'date'}.csv`;
-            return new Response('﻿' + lines.join('\n'), {
-                headers: {
-                    'Content-Type': 'text/csv; charset=utf-8',
-                    'Content-Disposition': `attachment; filename="${filename}"`,
-                },
-            });
+            return reportResponse(
+                spec,
+                `GST-${section}-${meta.periodFrom || 'all'}_${meta.periodTo || 'date'}`,
+                format
+            );
         }
 
         return NextResponse.json({

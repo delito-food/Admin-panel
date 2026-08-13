@@ -3,6 +3,8 @@ import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedResponse } from '@/lib/api-auth';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
+import { reportResponse, platformMeta } from '@/lib/report-export';
+import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 
 export async function GET(request: Request) {
     try {
@@ -304,26 +306,73 @@ export async function GET(request: Request) {
             };
         });
 
-        // CSV export
+        // ── File export (styled .xlsx by default, CSV on request) ──
         const format = searchParams.get('format');
-        if (format === 'csv') {
-            const bom = '\uFEFF';
-            const lines: string[] = [];
-            lines.push('"Invoice No.","Order ID","Date","Time","Customer","Phone","Vendor","Status","Payment Mode","Payment Status","Items","Gross Item Total (₹)","Item Discount (₹)","Item Total (₹)","Promo Disc (₹)","Coin Disc (₹)","HungerGame Disc (₹)","Delivery Disc (₹)","Total Discount (₹)","Delivery Fee (₹)","Taxes (₹)","Total (₹)","Delivery Address","Delivery Person","Promo Code","Coins Used"');
-            orders.forEach((o: any) => {
-                const d = new Date(o.createdAt);
-                const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-                const itemList = (o.itemNames || []).join('; ');
-                const grossItemTotal = (o.itemTotal || 0) + (o.itemDiscount || 0);
-                lines.push(`"${o.invoiceNumber || ''}","${o.orderId}","${date}","${time}","${(o.customerName || '').replace(/"/g, '""')}","${o.customerPhone}","${(o.vendorName || '').replace(/"/g, '""')}","${o.status}","${o.paymentMode}","${o.paymentStatus}","${itemList.replace(/"/g, '""')}",${grossItemTotal.toFixed(2)},${(o.itemDiscount || 0).toFixed(2)},${(o.itemTotal || 0).toFixed(2)},${(o.promoDiscount || 0).toFixed(2)},${(o.coinDiscount || 0).toFixed(2)},${(o.hungerGameDiscount || 0).toFixed(2)},${(o.deliveryDiscount || 0).toFixed(2)},${(o.totalDiscount || 0).toFixed(2)},${(o.deliveryFee || 0).toFixed(2)},${(o.taxes || 0).toFixed(2)},${(o.total || 0).toFixed(2)},"${(o.deliveryAddress || '').replace(/"/g, '""')}","${(o.deliveryPersonName || '')}","${o.promoCode || ''}",${o.coinsUsed || 0}`);
-            });
-            return new Response(bom + lines.join('\n'), {
-                headers: {
-                    'Content-Type': 'text/csv; charset=utf-8',
-                    'Content-Disposition': `attachment; filename="All_Orders_${new Date().toISOString().slice(0, 10)}.csv"`,
+        if (format === 'csv' || format === 'xlsx') {
+            const spec: XlsxSheetSpec = {
+                sheetName: 'Orders',
+                title: 'Order Register',
+                subtitle: 'All orders with their invoice numbers, discounts and tax',
+                meta: platformMeta([
+                    { label: 'Status filter', value: status && status !== 'all' ? status : 'All statuses' },
+                    { label: 'Orders exported', value: String(orders.length) },
+                ]),
+                columns: [
+                    { header: 'Invoice No.', key: 'invoiceNumber', width: 20 },
+                    { header: 'Order ID', key: 'orderId', width: 24 },
+                    { header: 'Date', key: 'dateLabel', width: 14 },
+                    { header: 'Time', key: 'timeLabel', width: 11 },
+                    { header: 'Customer', key: 'customerName', width: 22 },
+                    { header: 'Phone', key: 'customerPhone', width: 14 },
+                    { header: 'Restaurant', key: 'vendorName', width: 24 },
+                    { header: 'Status', key: 'status', width: 13 },
+                    { header: 'Payment Mode', key: 'paymentMode', width: 14 },
+                    { header: 'Payment Status', key: 'paymentStatus', width: 14 },
+                    { header: 'Items', key: 'itemList', width: 40 },
+                    { header: 'Gross Item Total', key: 'grossItemTotal', width: 16, type: 'currency' },
+                    { header: 'Item Discount', key: 'itemDiscount', width: 14, type: 'currency' },
+                    { header: 'Item Total', key: 'itemTotal', width: 14, type: 'currency' },
+                    { header: 'Promo Discount', key: 'promoDiscount', width: 15, type: 'currency' },
+                    { header: 'Coin Discount', key: 'coinDiscount', width: 14, type: 'currency' },
+                    { header: 'HungerGame Discount', key: 'hungerGameDiscount', width: 18, type: 'currency' },
+                    { header: 'Delivery Discount', key: 'deliveryDiscount', width: 16, type: 'currency' },
+                    { header: 'Total Discount', key: 'totalDiscount', width: 15, type: 'currency' },
+                    { header: 'Delivery Fee', key: 'deliveryFee', width: 14, type: 'currency' },
+                    { header: 'Platform Fee', key: 'smallOrderSupportFee', width: 14, type: 'currency' },
+                    { header: 'Taxes (GST)', key: 'taxes', width: 14, type: 'currency' },
+                    { header: 'Total', key: 'total', width: 14, type: 'currency' },
+                    { header: 'Delivery Address', key: 'deliveryAddress', width: 40 },
+                    { header: 'Delivery Partner', key: 'deliveryPersonName', width: 22 },
+                    { header: 'Promo Code', key: 'promoCode', width: 14 },
+                    { header: 'Coins Used', key: 'coinsUsed', width: 12, type: 'number' },
+                ],
+                rows: orders.map((o: any) => {
+                    const d = new Date(o.createdAt);
+                    return {
+                        ...o,
+                        dateLabel: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                        timeLabel: d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+                        itemList: (o.itemNames || []).join('; '),
+                        grossItemTotal: round2((o.itemTotal || 0) + (o.itemDiscount || 0)),
+                    };
+                }),
+                totals: {
+                    invoiceNumber: 'TOTAL',
+                    grossItemTotal: round2(orders.reduce((s: number, o: any) => s + (o.itemTotal || 0) + (o.itemDiscount || 0), 0)),
+                    itemDiscount: round2(orders.reduce((s: number, o: any) => s + (o.itemDiscount || 0), 0)),
+                    itemTotal: round2(orders.reduce((s: number, o: any) => s + (o.itemTotal || 0), 0)),
+                    totalDiscount: round2(orders.reduce((s: number, o: any) => s + (o.totalDiscount || 0), 0)),
+                    deliveryFee: round2(orders.reduce((s: number, o: any) => s + (o.deliveryFee || 0), 0)),
+                    smallOrderSupportFee: round2(orders.reduce((s: number, o: any) => s + (o.smallOrderSupportFee || 0), 0)),
+                    taxes: round2(orders.reduce((s: number, o: any) => s + (o.taxes || 0), 0)),
+                    total: round2(orders.reduce((s: number, o: any) => s + (o.total || 0), 0)),
                 },
-            });
+                notes: [
+                    'Invoice numbers are issued the first time an invoice is generated for an order; "Not issued" means none exists yet.',
+                    'Item Total is already net of menu and offer discounts — Gross Item Total adds them back for reference.',
+                ],
+            };
+            return reportResponse(spec, `Orders_${new Date().toISOString().slice(0, 10)}`, format);
         }
 
         return NextResponse.json({ success: true, data: orders });

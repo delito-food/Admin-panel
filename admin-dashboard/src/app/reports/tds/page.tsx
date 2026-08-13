@@ -53,14 +53,14 @@ export default function TDSReportPage() {
     };
 
     const handleDownloadCSV = async () => {
-        let url = `/api/reports/tds?section=${section}&format=csv`;
+        let url = `/api/reports/tds?section=${section}&format=xlsx`;
         if (dateFrom) url += `&from=${dateFrom}`;
         if (dateTo) url += `&to=${dateTo}`;
         // /api/* needs a bearer token — a plain window.open() navigation cannot carry it
         try {
-            await downloadAuthenticatedFile(url, `TDS_${section}_Report.csv`);
+            await downloadAuthenticatedFile(url, `TDS_${section}_Report.xlsx`);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'CSV download failed');
+            alert(err instanceof Error ? err.message : 'Excel download failed');
         }
     };
 

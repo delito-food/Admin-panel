@@ -2366,6 +2366,52 @@ body {
   cursor: pointer;
 }
 
+/* Export menu: the main row downloads .xlsx, the chip downloads .csv */
+.dropdown-heading {
+  padding: 6px 10px 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--foreground-secondary);
+}
+
+.export-option {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.export-option:hover {
+  background: var(--surface-hover);
+}
+
+.export-option .dropdown-item {
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.export-option-csv {
+  flex: 0 0 auto;
+  margin: 4px 6px 4px 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground-secondary);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.export-option-csv:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
 .gst-meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

@@ -25,6 +25,9 @@ import {
 } from 'lucide-react';
 import { useApi, Order } from '@/hooks/useApi';
 import { authenticatedFetch } from '@/lib/api-client';
+import { buildXlsx, downloadXlsx } from '@/lib/xlsx-writer';
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function InvoicesPage() {
     const { data: orders, loading, refetch } = useApi<Order[]>('/api/orders');
@@ -124,56 +127,99 @@ export default function InvoicesPage() {
         }
     };
 
-    // Export the filtered invoice list (opens directly in Excel)
+    // Export the filtered invoice list as a styled Excel workbook.
+    // Built client-side so the on-screen filters (status, date range, search)
+    // are reflected in the file.
     const handleExport = () => {
-        const headers = [
-            'Invoice No.', 'Food Invoice No.', 'Delivery Invoice No.', 'Platform Invoice No.',
-            'Order ID', 'Date', 'Time', 'Customer', 'Phone', 'Vendor', 'Status',
-            'Payment Mode', 'Payment Status',
-            'Gross Item Total', 'Item Discount', 'Item Total',
-            'Promo Discount', 'Coin Discount', 'HungerGame Discount', 'Delivery Discount',
-            'Total Discount', 'Delivery Fee', 'Platform Fee', 'Taxes (GST)', 'Grand Total',
-        ];
-        const esc = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-        const rows = filteredOrders.map(o => {
-            const d = new Date(o.createdAt);
-            const inv = o.invoiceNumber && o.invoiceNumber !== 'Not issued' ? o.invoiceNumber : '';
-            const itemDiscount = o.itemDiscount || 0;
-            return [
-                esc(o.invoiceNumber || ''),
-                esc(inv ? `${inv}-F` : ''),
-                esc(inv && (o.deliveryFee || 0) > 0 ? `${inv}-D` : ''),
-                esc(inv && (o.smallOrderSupportFee || 0) > 0 ? `${inv}-P` : ''),
-                esc(o.orderId),
-                esc(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })),
-                esc(d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })),
-                esc(o.customerName || ''),
-                esc(o.customerPhone || ''),
-                esc(o.vendorName || ''),
-                esc(o.status),
-                esc(o.paymentMode),
-                esc(o.paymentStatus),
-                ((o.itemTotal || 0) + itemDiscount).toFixed(2),
-                itemDiscount.toFixed(2),
-                (o.itemTotal || 0).toFixed(2),
-                (o.promoDiscount || 0).toFixed(2),
-                (o.coinDiscount || 0).toFixed(2),
-                (o.hungerGameDiscount || 0).toFixed(2),
-                (o.deliveryDiscount || 0).toFixed(2),
-                (o.totalDiscount || 0).toFixed(2),
-                (o.deliveryFee || 0).toFixed(2),
-                (o.smallOrderSupportFee || 0).toFixed(2),
-                (o.taxes || 0).toFixed(2),
-                (o.total || 0).toFixed(2),
-            ].join(',');
+        const stamp = new Date();
+        const bytes = buildXlsx({
+            sheetName: 'Invoices',
+            title: 'Invoice Register',
+            subtitle: 'Tax invoices issued for orders on the Delito platform',
+            meta: [
+                { label: 'Legal name', value: 'Delito' },
+                { label: 'Status filter', value: statusFilter },
+                {
+                    label: 'Date range',
+                    value: dateFrom || dateTo
+                        ? `${dateFrom || 'Beginning'} to ${dateTo || 'Date'}`
+                        : 'All time',
+                },
+                { label: 'Search', value: searchQuery || '—' },
+                { label: 'Invoices exported', value: String(filteredOrders.length) },
+                {
+                    label: 'Generated on',
+                    value: stamp.toLocaleString('en-IN', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit', hour12: true,
+                    }),
+                },
+                { label: 'Currency', value: 'INR (₹)' },
+            ],
+            columns: [
+                { header: 'Invoice No.', key: 'invoiceNumber', width: 20 },
+                { header: 'Food Invoice No.', key: 'foodInvoice', width: 20 },
+                { header: 'Delivery Invoice No.', key: 'deliveryInvoice', width: 20 },
+                { header: 'Platform Invoice No.', key: 'platformInvoice', width: 20 },
+                { header: 'Order ID', key: 'orderId', width: 24 },
+                { header: 'Date', key: 'dateLabel', width: 14 },
+                { header: 'Time', key: 'timeLabel', width: 11 },
+                { header: 'Customer', key: 'customerName', width: 22 },
+                { header: 'Phone', key: 'customerPhone', width: 14 },
+                { header: 'Restaurant', key: 'vendorName', width: 24 },
+                { header: 'Status', key: 'status', width: 13 },
+                { header: 'Payment Mode', key: 'paymentMode', width: 14 },
+                { header: 'Payment Status', key: 'paymentStatus', width: 14 },
+                { header: 'Gross Item Total', key: 'grossItemTotal', width: 16, type: 'currency' },
+                { header: 'Item Discount', key: 'itemDiscountValue', width: 14, type: 'currency' },
+                { header: 'Item Total', key: 'itemTotal', width: 14, type: 'currency' },
+                { header: 'Promo Discount', key: 'promoDiscount', width: 15, type: 'currency' },
+                { header: 'Coin Discount', key: 'coinDiscount', width: 14, type: 'currency' },
+                { header: 'HungerGame Discount', key: 'hungerGameDiscountValue', width: 18, type: 'currency' },
+                { header: 'Delivery Discount', key: 'deliveryDiscountValue', width: 16, type: 'currency' },
+                { header: 'Total Discount', key: 'totalDiscountValue', width: 15, type: 'currency' },
+                { header: 'Delivery Fee', key: 'deliveryFee', width: 14, type: 'currency' },
+                { header: 'Platform Fee', key: 'smallOrderSupportFee', width: 14, type: 'currency' },
+                { header: 'Taxes (GST)', key: 'taxes', width: 14, type: 'currency' },
+                { header: 'Grand Total', key: 'total', width: 14, type: 'currency' },
+            ],
+            rows: filteredOrders.map(o => {
+                const d = new Date(o.createdAt);
+                const inv = o.invoiceNumber && o.invoiceNumber !== 'Not issued' ? o.invoiceNumber : '';
+                const itemDiscount = o.itemDiscount || 0;
+                return {
+                    ...o,
+                    invoiceNumber: o.invoiceNumber || '',
+                    foodInvoice: inv ? `${inv}-F` : '',
+                    deliveryInvoice: inv && (o.deliveryFee || 0) > 0 ? `${inv}-D` : '',
+                    platformInvoice: inv && (o.smallOrderSupportFee || 0) > 0 ? `${inv}-P` : '',
+                    dateLabel: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                    timeLabel: d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+                    grossItemTotal: round2((o.itemTotal || 0) + itemDiscount),
+                    itemDiscountValue: round2(itemDiscount),
+                    hungerGameDiscountValue: round2(o.hungerGameDiscount || 0),
+                    deliveryDiscountValue: round2(o.deliveryDiscount || 0),
+                    totalDiscountValue: round2(o.totalDiscount || 0),
+                };
+            }),
+            totals: {
+                invoiceNumber: 'TOTAL',
+                grossItemTotal: round2(filteredOrders.reduce((s, o) => s + (o.itemTotal || 0) + (o.itemDiscount || 0), 0)),
+                itemDiscountValue: round2(filteredOrders.reduce((s, o) => s + (o.itemDiscount || 0), 0)),
+                itemTotal: round2(filteredOrders.reduce((s, o) => s + (o.itemTotal || 0), 0)),
+                totalDiscountValue: round2(filteredOrders.reduce((s, o) => s + (o.totalDiscount || 0), 0)),
+                deliveryFee: round2(filteredOrders.reduce((s, o) => s + (o.deliveryFee || 0), 0)),
+                smallOrderSupportFee: round2(filteredOrders.reduce((s, o) => s + (o.smallOrderSupportFee || 0), 0)),
+                taxes: round2(filteredOrders.reduce((s, o) => s + (o.taxes || 0), 0)),
+                total: round2(filteredOrders.reduce((s, o) => s + (o.total || 0), 0)),
+            },
+            notes: [
+                'Sub-invoices: -F food (on behalf of the restaurant), -D delivery, -P platform fee.',
+                'A blank invoice number means no invoice has been generated for that order yet.',
+            ],
         });
-        const csv = '﻿' + [headers.map(esc).join(','), ...rows].join('\n');
-        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Invoices_${new Date().toISOString().slice(0, 10)}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+
+        downloadXlsx(bytes, `Invoices_${stamp.toISOString().slice(0, 10)}.xlsx`);
     };
 
     // Preview invoice
