@@ -45,7 +45,7 @@ import { authenticatedFetch, downloadAuthenticatedFile } from '@/lib/api-client'
 
 const CHART_COLORS = ['#F4511E', '#FF9904', '#F6D59F', '#10B981', '#E9190C'];
 
-const statusFilters = ['All', 'Pending', 'Accepted', 'Preparing', 'Prepared', 'Sent for delivery', 'Delivered', 'Not Responded', 'Cancelled', 'Cancelled by Admin'];
+const statusFilters = ['All', 'Pending', 'Accepted', 'Preparing', 'Prepared', 'Sent for delivery', 'Delivered', 'Not Responded', 'Expired', 'Cancelled', 'Cancelled by Admin'];
 
 export default function OrdersPage() {
     const { data: orders, loading, refetch } = useApi<Order[]>('/api/orders');
@@ -191,6 +191,9 @@ export default function OrdersPage() {
         onTheWay: (orders || []).filter(o => o.status === 'Sent for delivery').length,
         delivered: (orders || []).filter(o => o.status === 'Delivered').length,
         notResponded: (orders || []).filter(o => o.status === 'Not Responded').length,
+        // 'Expired' = vendor accepted but no delivery partner was ever found.
+        // Written by functions/deliveryPush.js expireDeliveryRequests.
+        noRider: (orders || []).filter(o => o.status === 'Expired').length,
     };
 
     const orderTrendData = (orders || []).reduce((acc: { date: string; orders: number }[], order) => {
@@ -210,6 +213,7 @@ export default function OrdersPage() {
         { name: 'On the Way', value: stats.onTheWay, color: '#F4511E' },
         { name: 'Delivered', value: stats.delivered, color: '#10B981' },
         { name: 'Not Responded', value: stats.notResponded, color: '#E9190C' },
+        { name: 'No Rider', value: stats.noRider, color: '#9333EA' },
     ].filter(item => item.value > 0);
 
     if (loading) {
@@ -963,7 +967,7 @@ export default function OrdersPage() {
 
                                         {/* Platform earnings breakdown — only for delivered orders */}
                                         {(() => {
-                                            const cancelledStatuses = ['Cancelled', 'Declined', 'Not Responded'];
+                                            const cancelledStatuses = ['Cancelled', 'Declined', 'Not Responded', 'Expired'];
                                             const isCancelled = cancelledStatuses.includes(selectedOrder.status);
                                             if (isCancelled) {
                                                 return (

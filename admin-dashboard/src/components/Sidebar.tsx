@@ -69,6 +69,11 @@ const navigation: NavItem[] = [
         icon: <Sparkles size={20} />,
     },
     {
+        label: 'Hero Banners',
+        href: '/hero-banners',
+        icon: <ImageIcon size={20} />,
+    },
+    {
         label: 'Push Notifications',
         href: '/push-notifications',
         icon: <Bell size={20} />,

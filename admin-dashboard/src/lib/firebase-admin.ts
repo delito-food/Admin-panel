@@ -1,7 +1,31 @@
+import dns from 'node:dns';
 import { initializeApp, getApps, cert, type ServiceAccount, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getMessaging } from 'firebase-admin/messaging';
+
+/**
+ * Resolve Google's hosts over IPv4 first.
+ *
+ * Node 17+ hands back DNS results in whatever order the resolver gave them
+ * ("verbatim"), which usually means the AAAA record first. If the machine
+ * advertises IPv6 but has no working route over it — common on home ISPs,
+ * hotel and office Wi-Fi, and inside some VPNs — every Firestore connection
+ * goes to an address like `2404:6800:4002:819::200a` and sits there until the
+ * TCP connect times out. gRPC then retries with backoff, which is how one
+ * `/api/notifications` request ends up taking minutes and failing with
+ * `14 UNAVAILABLE … connect ETIMEDOUT`.
+ *
+ * Preferring IPv4 costs nothing on a healthy dual-stack network and removes
+ * the stall on a broken one. `NODE_OPTIONS=--dns-result-order=ipv4first` does
+ * the same from outside; doing it here means it can't be forgotten on a new
+ * machine or in a deploy environment.
+ */
+try {
+    dns.setDefaultResultOrder('ipv4first');
+} catch {
+    // Not available outside the Node runtime — nothing to do.
+}
 
 // Cache for lazy initialization
 let app: App | null = null;
@@ -51,6 +75,27 @@ function getDb(): Firestore | null {
     if (!app) return null;
 
     firestoreDb = getFirestore(app);
+
+    /**
+     * Read over REST instead of gRPC.
+     *
+     * The admin dashboard only ever does one-shot reads and writes — no
+     * snapshot listeners — so gRPC's long-lived channel buys nothing here, and
+     * it is the part that fails loudly on flaky networks: a dead channel
+     * retries internally for minutes before surfacing `14 UNAVAILABLE`, and
+     * every route waiting on it hangs for that whole time. REST fails in
+     * seconds and reconnects per request.
+     *
+     * `settings()` can only be called before the instance is first used, and
+     * `getFirestore(app)` returns the same instance across Next's dev hot
+     * reloads, so a second call after a reload throws. That's harmless.
+     */
+    try {
+        firestoreDb.settings({ preferRest: true });
+    } catch {
+        // Already configured (hot reload) — the existing settings stand.
+    }
+
     return firestoreDb;
 }
 
@@ -251,6 +296,125 @@ interface CacheEntry<T> {
 const cache = new Map<string, CacheEntry<unknown>>();
 const DEFAULT_CACHE_TTL = 60_000; // 60 seconds
 
+// ── Fail fast when Firestore is unreachable ──
+//
+// A route like /api/notifications reads four collections in sequence. With no
+// deadline, an unreachable backend costs each read the full gRPC/REST retry
+// budget — the request that prompted this took 3.4 minutes to return, and
+// still returned nothing useful. Three things bound that:
+//
+//   1. A hard deadline per read, so one read can't outlast a page load.
+//   2. A circuit breaker, so reads two through four don't each re-pay the
+//      deadline once the first has already proven the backend is down.
+//   3. Stale cache as the fallback, so a dashboard that was working a minute
+//      ago keeps rendering last-known data instead of empty panels.
+
+/** Per-read deadline. Override with FIRESTORE_TIMEOUT_MS if a query is slow. */
+const FIRESTORE_TIMEOUT_MS = Number(process.env.FIRESTORE_TIMEOUT_MS) || 8_000;
+
+/** How long one failure suppresses further attempts. */
+const BREAKER_MS = Number(process.env.FIRESTORE_BREAKER_MS) || 10_000;
+
+let unreachableUntil = 0;
+
+export class FirestoreUnavailableError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'FirestoreUnavailableError';
+    }
+}
+
+/** Connection-level failure, as opposed to a permission or query error. */
+function isConnectionFailure(err: unknown): boolean {
+    if (err instanceof FirestoreUnavailableError) return true;
+    const e = err as { code?: unknown; message?: unknown };
+    // gRPC: 14 UNAVAILABLE, 4 DEADLINE_EXCEEDED. Node sockets: ETIMEDOUT etc.
+    if (e?.code === 14 || e?.code === 4) return true;
+    return /ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|ENOTFOUND|UNAVAILABLE/i.test(
+        String(e?.code ?? '') + ' ' + String(e?.message ?? '')
+    );
+}
+
+/**
+ * Run a Firestore read under a deadline. The underlying request may still be
+ * in flight when this rejects — it is abandoned, not cancelled, which is fine
+ * for reads.
+ */
+export function withFirestoreTimeout<T>(
+    work: Promise<T>,
+    label: string,
+    ms: number = FIRESTORE_TIMEOUT_MS
+): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+            timer = setTimeout(
+                () =>
+                    reject(
+                        new FirestoreUnavailableError(
+                            `Firestore read "${label}" gave up after ${ms}ms — the backend is unreachable.`
+                        )
+                    ),
+                ms
+            );
+        }),
+    ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/** True while a recent failure says not to bother trying again yet. */
+function breakerOpen(): boolean {
+    return Date.now() < unreachableUntil;
+}
+
+function tripBreaker(collectionName: string, err: unknown): void {
+    if (!isConnectionFailure(err)) return;
+    const alreadyOpen = breakerOpen();
+    unreachableUntil = Date.now() + BREAKER_MS;
+    if (!alreadyOpen) {
+        console.warn(
+            `Firestore unreachable (first failure on "${collectionName}"). ` +
+                `Skipping reads for ${BREAKER_MS}ms and serving cached data where available.`,
+            err instanceof Error ? err.message : err
+        );
+    }
+}
+
+/**
+ * The shared read path: fresh cache → live read → stale cache → throw.
+ */
+async function readThroughCache<T>(
+    cacheKey: string,
+    collectionName: string,
+    ttl: number,
+    read: () => Promise<T>
+): Promise<T> {
+    const cached = cache.get(cacheKey) as CacheEntry<T> | undefined;
+    if (cached && Date.now() < cached.expiry) {
+        return cached.data;
+    }
+
+    if (breakerOpen()) {
+        if (cached) return cached.data;
+        throw new FirestoreUnavailableError(
+            `Firestore is unreachable and nothing is cached for "${collectionName}".`
+        );
+    }
+
+    try {
+        const data = await withFirestoreTimeout(read(), collectionName);
+        cache.set(cacheKey, { data, expiry: Date.now() + ttl });
+        return data;
+    } catch (err) {
+        tripBreaker(collectionName, err);
+        if (cached && isConnectionFailure(err)) {
+            console.warn(`Serving stale "${collectionName}" — live read failed.`);
+            return cached.data;
+        }
+        throw err;
+    }
+}
+
 /**
  * Get data from cache or fetch from Firestore.
  * Caches the raw doc data array for the given collection/query key.
@@ -259,16 +423,9 @@ export async function cachedCollectionGet(
     collectionName: string,
     ttl: number = DEFAULT_CACHE_TTL
 ): Promise<FirebaseFirestore.QuerySnapshot> {
-    // For full collection reads, just return the snapshot directly
-    // but cache it to avoid repeated reads
-    const cacheKey = `col:${collectionName}`;
-    const cached = cache.get(cacheKey) as CacheEntry<FirebaseFirestore.QuerySnapshot> | undefined;
-    if (cached && Date.now() < cached.expiry) {
-        return cached.data;
-    }
-    const snapshot = await db.collection(collectionName).get();
-    cache.set(cacheKey, { data: snapshot, expiry: Date.now() + ttl });
-    return snapshot;
+    return readThroughCache(`col:${collectionName}`, collectionName, ttl, () =>
+        db.collection(collectionName).get()
+    );
 }
 
 /**
@@ -280,16 +437,10 @@ export async function cachedCollection(
     ttl: number = DEFAULT_CACHE_TTL
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<Array<{ id: string; [key: string]: any }>> {
-    const cacheKey = `col_data:${collectionName}`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cached = cache.get(cacheKey) as CacheEntry<Array<{ id: string; [key: string]: any }>> | undefined;
-    if (cached && Date.now() < cached.expiry) {
-        return cached.data;
-    }
-    const snapshot = await db.collection(collectionName).get();
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    cache.set(cacheKey, { data, expiry: Date.now() + ttl });
-    return data;
+    return readThroughCache(`col_data:${collectionName}`, collectionName, ttl, async () => {
+        const snapshot = await db.collection(collectionName).get();
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    });
 }
 
 /**
