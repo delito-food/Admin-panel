@@ -125,7 +125,24 @@ export const db = {
             throw new Error('Firebase not initialized. Please set environment variables.');
         }
         return firestore.batch();
-    }
+    },
+    /**
+     * Run a Firestore transaction.
+     *
+     * Needed anywhere a read-then-write must be atomic — notably allocating
+     * invoice numbers from a counter, where two concurrent requests must never
+     * be handed the same number.
+     */
+    runTransaction: <T>(
+        updateFunction: (transaction: FirebaseFirestore.Transaction) => Promise<T>,
+        transactionOptions?: FirebaseFirestore.ReadWriteTransactionOptions
+    ): Promise<T> => {
+        const firestore = getDb();
+        if (!firestore) {
+            throw new Error('Firebase not initialized. Please set environment variables.');
+        }
+        return firestore.runTransaction(updateFunction, transactionOptions);
+    },
 };
 
 export const auth = {

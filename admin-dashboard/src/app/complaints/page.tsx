@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     AlertTriangle, RefreshCw, Search, MessageSquare, Clock,
     CheckCircle2, XCircle, X, IndianRupee, Package, User,
-    Phone, Mail, Store, Bike, Filter, ArrowUpRight, Loader2, Eye
+    Phone, Mail, Store, Bike, Filter, ArrowUpRight, Loader2, Eye,
+    Camera, ImageOff, ChevronLeft, ChevronRight, ExternalLink
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 
@@ -34,8 +35,13 @@ interface Complaint {
     refundId: string;
     resolution: string;
     adminNotes: string;
+    /** Photo evidence uploaded by the customer from the app */
+    attachments: string[];
+    attachmentCount: number;
+    attachmentUploadFailures: number;
     createdAt: string;
     updatedAt: string;
+    resolvedAt: string;
 }
 
 interface ComplaintData {
@@ -47,6 +53,7 @@ interface ComplaintData {
         resolved: number;
         refundPending: number;
         highPriority: number;
+        withPhotos: number;
     };
 }
 
@@ -112,13 +119,14 @@ function getRefundDisplay(refundStatus: string, refundAmount: number, orderTotal
 
 function StatCard({ title, value, icon: Icon, color = 'primary' }: {
     title: string; value: string | number; icon: React.ElementType;
-    color?: 'primary' | 'success' | 'warning' | 'error';
+    color?: 'primary' | 'success' | 'warning' | 'error' | 'info';
 }) {
     const colorMap = {
         primary: { bg: 'rgba(244, 81, 30, 0.15)', text: '#F4511E' },
         success: { bg: 'rgba(16, 185, 129, 0.15)', text: '#10B981' },
         warning: { bg: 'rgba(245, 158, 11, 0.15)', text: '#F59E0B' },
         error: { bg: 'rgba(239, 68, 68, 0.15)', text: '#EF4444' },
+        info: { bg: 'rgba(99, 102, 241, 0.15)', text: '#6366F1' },
     };
     return (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ padding: 16 }}>
@@ -162,6 +170,10 @@ export default function ComplaintsPage() {
     const [refundReason, setRefundReason] = useState('');
     const [processingRefund, setProcessingRefund] = useState(false);
 
+    // Photo evidence lightbox — index into the selected complaint's attachments
+    const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+    const [brokenPhotos, setBrokenPhotos] = useState<Record<string, boolean>>({});
+
     const handleRefresh = async () => { setRefreshing(true); await refetch(); setRefreshing(false); };
 
     const formatCurrency = (amount: number) =>
@@ -179,6 +191,18 @@ export default function ComplaintsPage() {
         setResolution(complaint.resolution || '');
         setAdminNotes(complaint.adminNotes || '');
         setNewStatus(complaint.status);
+        setLightboxIndex(null);
+    };
+
+    // ── Photo evidence helpers ──
+    const photosOf = (complaint: Complaint | null): string[] => complaint?.attachments || [];
+
+    const showPhoto = (index: number) => setLightboxIndex(index);
+    const closePhoto = () => setLightboxIndex(null);
+    const stepPhoto = (delta: number) => {
+        const photos = photosOf(selectedComplaint);
+        if (photos.length === 0 || lightboxIndex === null) return;
+        setLightboxIndex((lightboxIndex + delta + photos.length) % photos.length);
     };
 
     const handleUpdateComplaint = async () => {
@@ -269,6 +293,7 @@ export default function ComplaintsPage() {
                 <StatCard title="Resolved" value={data?.summary.resolved || 0} icon={CheckCircle2} color="success" />
                 <StatCard title="Refund Pending" value={data?.summary.refundPending || 0} icon={IndianRupee} color="warning" />
                 <StatCard title="High Priority" value={data?.summary.highPriority || 0} icon={ArrowUpRight} color="error" />
+                <StatCard title="With Photos" value={data?.summary.withPhotos || 0} icon={Camera} color="info" />
             </div>
 
             {/* Table */}
@@ -340,7 +365,21 @@ export default function ComplaintsPage() {
                                                 <span style={{ fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>{complaintTypeLabels[complaint.type] || complaint.type}</span>
                                             </td>
                                             <td style={{ maxWidth: 200 }}>
-                                                <p style={{ fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--foreground)' }}>{complaint.subject}</p>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <p style={{ fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--foreground)' }}>{complaint.subject}</p>
+                                                    {complaint.attachmentCount > 0 && (
+                                                        <span
+                                                            title={`${complaint.attachmentCount} photo${complaint.attachmentCount > 1 ? 's' : ''} attached`}
+                                                            style={{
+                                                                display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0,
+                                                                padding: '1px 6px', borderRadius: 100, fontSize: '0.62rem', fontWeight: 700,
+                                                                background: 'rgba(99,102,241,0.12)', color: '#6366F1',
+                                                            }}
+                                                        >
+                                                            <Camera size={10} />{complaint.attachmentCount}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {complaint.orderId && (
                                                     <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>
                                                         Order: #{complaint.orderId.slice(-8).toUpperCase()}
@@ -470,6 +509,97 @@ export default function ComplaintsPage() {
                                 </div>
                                 <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', marginBottom: 6 }}>{selectedComplaint.subject}</h4>
                                 <p style={{ fontSize: '0.85rem', color: 'var(--foreground-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{selectedComplaint.description}</p>
+                            </div>
+
+                            {/* Photo evidence uploaded from the customer app */}
+                            <div style={{ marginBottom: 20 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                                    <Camera size={14} color="var(--foreground-secondary)" />
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                        Photo Evidence
+                                    </span>
+                                    {photosOf(selectedComplaint).length > 0 && (
+                                        <span style={{
+                                            padding: '1px 8px', borderRadius: 100, fontSize: '0.65rem', fontWeight: 700,
+                                            background: 'rgba(99,102,241,0.12)', color: '#6366F1',
+                                        }}>
+                                            {photosOf(selectedComplaint).length}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {(selectedComplaint.attachmentUploadFailures || 0) > 0 && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+                                        marginBottom: 10, borderRadius: 10,
+                                        background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)',
+                                        color: '#B45309', fontSize: '0.75rem',
+                                    }}>
+                                        <AlertTriangle size={14} />
+                                        <span>
+                                            {selectedComplaint.attachmentUploadFailures} photo
+                                            {selectedComplaint.attachmentUploadFailures > 1 ? 's' : ''} failed to upload from the customer&apos;s device.
+                                        </span>
+                                    </div>
+                                )}
+
+                                {photosOf(selectedComplaint).length === 0 ? (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px',
+                                        borderRadius: 10, border: '1px dashed var(--border)',
+                                        color: 'var(--foreground-secondary)', fontSize: '0.78rem',
+                                    }}>
+                                        <ImageOff size={16} />
+                                        <span>No photos were attached to this complaint.</span>
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                        {photosOf(selectedComplaint).map((url, index) => (
+                                            <div
+                                                key={url}
+                                                onClick={() => !brokenPhotos[url] && showPhoto(index)}
+                                                title={brokenPhotos[url] ? 'Image could not be loaded' : 'Click to enlarge'}
+                                                style={{
+                                                    position: 'relative', width: 104, height: 104, borderRadius: 12,
+                                                    overflow: 'hidden', border: '1px solid var(--border)',
+                                                    background: 'var(--surface)',
+                                                    cursor: brokenPhotos[url] ? 'not-allowed' : 'zoom-in',
+                                                    flexShrink: 0,
+                                                }}
+                                            >
+                                                {brokenPhotos[url] ? (
+                                                    <div style={{
+                                                        width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+                                                        alignItems: 'center', justifyContent: 'center', gap: 4,
+                                                        color: 'var(--foreground-secondary)', fontSize: '0.62rem', textAlign: 'center', padding: 6,
+                                                    }}>
+                                                        <ImageOff size={18} />
+                                                        <span>Unavailable</span>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                        <img
+                                                            src={url}
+                                                            alt={`Complaint evidence ${index + 1}`}
+                                                            loading="lazy"
+                                                            onError={() => setBrokenPhotos(prev => ({ ...prev, [url]: true }))}
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                        />
+                                                        <span style={{
+                                                            position: 'absolute', bottom: 4, right: 4,
+                                                            padding: '1px 6px', borderRadius: 100,
+                                                            background: 'rgba(0,0,0,0.6)', color: '#fff',
+                                                            fontSize: '0.6rem', fontWeight: 600,
+                                                        }}>
+                                                            {index + 1}
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             {/* Refund Request */}
@@ -654,6 +784,107 @@ export default function ComplaintsPage() {
                                 </button>
                             </div>
                         </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Photo evidence lightbox */}
+            <AnimatePresence>
+                {selectedComplaint && lightboxIndex !== null && photosOf(selectedComplaint)[lightboxIndex] && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={closePhoto}
+                        style={{
+                            position: 'fixed', inset: 0, zIndex: 1200,
+                            background: 'rgba(0,0,0,0.88)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            padding: 24,
+                        }}
+                    >
+                        {/* Close */}
+                        <button
+                            onClick={closePhoto}
+                            aria-label="Close photo"
+                            style={{
+                                position: 'absolute', top: 18, right: 18, width: 38, height: 38,
+                                borderRadius: 10, border: 'none', cursor: 'pointer',
+                                background: 'rgba(255,255,255,0.16)', color: '#fff',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                        >
+                            <X size={18} />
+                        </button>
+
+                        {/* Open original in a new tab */}
+                        <a
+                            href={photosOf(selectedComplaint)[lightboxIndex]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                position: 'absolute', top: 18, right: 66, height: 38,
+                                borderRadius: 10, padding: '0 12px',
+                                background: 'rgba(255,255,255,0.16)', color: '#fff',
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                fontSize: '0.78rem', fontWeight: 600, textDecoration: 'none',
+                            }}
+                        >
+                            <ExternalLink size={15} /> Open
+                        </a>
+
+                        {/* Prev / Next */}
+                        {photosOf(selectedComplaint).length > 1 && (
+                            <>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); stepPhoto(-1); }}
+                                    aria-label="Previous photo"
+                                    style={{
+                                        position: 'absolute', left: 18, width: 40, height: 40, borderRadius: 999,
+                                        border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.16)',
+                                        color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    }}
+                                >
+                                    <ChevronLeft size={20} />
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); stepPhoto(1); }}
+                                    aria-label="Next photo"
+                                    style={{
+                                        position: 'absolute', right: 18, width: 40, height: 40, borderRadius: 999,
+                                        border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.16)',
+                                        color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    }}
+                                >
+                                    <ChevronRight size={20} />
+                                </button>
+                            </>
+                        )}
+
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <motion.img
+                            key={photosOf(selectedComplaint)[lightboxIndex]}
+                            initial={{ scale: 0.96, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            src={photosOf(selectedComplaint)[lightboxIndex]}
+                            alt={`Complaint evidence ${lightboxIndex + 1}`}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                maxWidth: '90vw', maxHeight: '84vh',
+                                objectFit: 'contain', borderRadius: 12,
+                                boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                            }}
+                        />
+
+                        <span style={{
+                            position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+                            padding: '5px 14px', borderRadius: 100,
+                            background: 'rgba(255,255,255,0.16)', color: '#fff',
+                            fontSize: '0.78rem', fontWeight: 600,
+                        }}>
+                            {lightboxIndex + 1} / {photosOf(selectedComplaint).length}
+                        </span>
                     </motion.div>
                 )}
             </AnimatePresence>

@@ -55,6 +55,48 @@ export const COMMISSION_PLATFORM = {
 export const COMMISSION_HSN_CODE = '998399';
 export const COMMISSION_GST_RATE = 18; // 18% total (9% CGST + 9% SGST)
 
+// ─── Commission invoice numbering ───
+// Numbers are issued from a single monotonic counter (counters/commissionInvoices)
+// and recorded in the `commissionInvoices` collection, keyed by vendorId_YYYY-MM.
+// A number is allocated exactly once per vendor per billing month; previewing an
+// invoice never consumes one.
+export const COMMISSION_INVOICE_PREFIX = 'DLT-COM';
+export const COMMISSION_INVOICES_COLLECTION = 'commissionInvoices';
+export const COMMISSION_INVOICE_COUNTER_DOC = 'commissionInvoices';
+
+/** Shown wherever an invoice number has not been allocated yet. */
+export const COMMISSION_INVOICE_NOT_ISSUED = 'Not issued';
+
+/** Stable document id for a vendor's invoice in a given billing month. */
+export function commissionInvoiceDocId(vendorId: string, month: string): string {
+    return `${vendorId}_${month}`;
+}
+
+/**
+ * Build a commission invoice number.
+ * Format: DLT-COM-YYMM-NNN (e.g. DLT-COM-2602-014)
+ * `sequence` comes from the shared counter, so numbers are unique across the
+ * whole platform and strictly increasing in the order they were issued.
+ */
+export function formatCommissionInvoiceNumber(
+    year: number,
+    monthNum: number,
+    sequence: number
+): string {
+    const yy = String(year).slice(-2);
+    const mm = String(monthNum).padStart(2, '0');
+    return `${COMMISSION_INVOICE_PREFIX}-${yy}${mm}-${String(sequence).padStart(3, '0')}`;
+}
+
+/** Pull the numeric sequence back out of a commission invoice number. */
+export function parseCommissionInvoiceSequence(invoiceNumber?: string | null): number {
+    if (!invoiceNumber) return 0;
+    const match = invoiceNumber.trim().match(/-(\d+)$/);
+    if (!match) return 0;
+    const n = parseInt(match[1], 10);
+    return Number.isFinite(n) ? n : 0;
+}
+
 /**
  * Commission Invoice data structure for vendor commission tax invoices.
  */
@@ -68,6 +110,10 @@ export interface CommissionInvoiceData {
         state: string;
     };
     invoiceNumber: string;
+    /** False when this is a preview and no number has been allocated yet. */
+    invoiceIssued?: boolean;
+    /** ISO timestamp of when the number was first allocated. */
+    invoiceIssuedAt?: string | null;
     invoiceDate: string;
     hsnCode: string;
     placeOfSupply: string;

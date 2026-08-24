@@ -1,13 +1,118 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Timestamp } from 'firebase-admin/firestore';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
-import { COMMISSION_PLATFORM, COMMISSION_HSN_CODE, CommissionInvoiceData } from '@/lib/invoice-constants';
+import {
+    COMMISSION_PLATFORM,
+    COMMISSION_HSN_CODE,
+    COMMISSION_INVOICES_COLLECTION,
+    COMMISSION_INVOICE_COUNTER_DOC,
+    COMMISSION_INVOICE_NOT_ISSUED,
+    CommissionInvoiceData,
+    commissionInvoiceDocId,
+    formatCommissionInvoiceNumber,
+    parseCommissionInvoiceSequence,
+} from '@/lib/invoice-constants';
 
 /**
- * GET /api/vendors/commission-invoice?vendorId=xxx&month=2026-02&format=pdf|json
+ * GET /api/vendors/commission-invoice?vendorId=xxx&month=2026-02&format=pdf|json&issue=true
  *
  * Generates a Commission Tax Invoice for a vendor for a given month.
  * Aggregates all delivered orders, groups them by week, calculates commission + GST.
+ *
+ * Invoice numbering
+ * -----------------
+ * A number is allocated **once** per vendor per billing month and stored in the
+ * `commissionInvoices` collection. Every later request for the same
+ * vendor + month returns that same number, so a re-download never produces a
+ * second document for the same period.
+ *
+ * Allocation runs inside a Firestore transaction against a single counter
+ * (`counters/commissionInvoices`), which makes the series gap-free and safe
+ * against two admins generating invoices at the same moment.
+ *
+ * A number is only consumed when the invoice is actually issued — that is, when
+ * a PDF is requested or `issue=true` is passed. Opening the JSON preview does
+ * not burn a number.
  */
+
+interface IssuedInvoice {
+    invoiceNumber: string;
+    sequence: number;
+    issuedAt: string | null;
+    issued: boolean;
+}
+
+/**
+ * Look up the invoice already issued for this vendor + month, if any.
+ */
+async function findIssuedInvoice(vendorId: string, month: string): Promise<IssuedInvoice | null> {
+    const docId = commissionInvoiceDocId(vendorId, month);
+    const snap = await db.collection(COMMISSION_INVOICES_COLLECTION).doc(docId).get();
+    if (!snap.exists) return null;
+
+    const data = snap.data() || {};
+    const invoiceNumber = (data.invoiceNumber as string) || '';
+    if (!invoiceNumber) return null;
+
+    return {
+        invoiceNumber,
+        sequence: (data.sequence as number) || parseCommissionInvoiceSequence(invoiceNumber),
+        issuedAt: data.issuedAt?.toDate?.()?.toISOString?.() || (data.issuedAt as string) || null,
+        issued: true,
+    };
+}
+
+/**
+ * Allocate — atomically and exactly once — the invoice number for this
+ * vendor + month, and record it alongside a snapshot of the billed totals.
+ */
+async function issueInvoiceNumber(
+    vendorId: string,
+    month: string,
+    year: number,
+    monthNum: number,
+    snapshot: Record<string, unknown>
+): Promise<IssuedInvoice> {
+    const invoiceRef = db.collection(COMMISSION_INVOICES_COLLECTION).doc(commissionInvoiceDocId(vendorId, month));
+    const counterRef = db.collection('counters').doc(COMMISSION_INVOICE_COUNTER_DOC);
+
+    return db.runTransaction(async (tx) => {
+        // Idempotency: if another request issued it first, reuse that number.
+        const existing = await tx.get(invoiceRef);
+        if (existing.exists && existing.data()?.invoiceNumber) {
+            const data = existing.data()!;
+            return {
+                invoiceNumber: data.invoiceNumber as string,
+                sequence: (data.sequence as number) || parseCommissionInvoiceSequence(data.invoiceNumber as string),
+                issuedAt: data.issuedAt?.toDate?.()?.toISOString?.() || null,
+                issued: true,
+            };
+        }
+
+        const counterSnap = await tx.get(counterRef);
+        const currentCount = (counterSnap.data()?.count as number) || 0;
+        const sequence = currentCount + 1;
+        const invoiceNumber = formatCommissionInvoiceNumber(year, monthNum, sequence);
+        const issuedAt = Timestamp.now();
+
+        tx.set(counterRef, { count: sequence, updatedAt: issuedAt }, { merge: true });
+        tx.set(invoiceRef, {
+            ...snapshot,
+            invoiceNumber,
+            sequence,
+            vendorId,
+            month,
+            issuedAt,
+        }, { merge: true });
+
+        return {
+            invoiceNumber,
+            sequence,
+            issuedAt: issuedAt.toDate().toISOString(),
+            issued: true,
+        };
+    });
+}
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
@@ -173,26 +278,31 @@ export async function GET(request: NextRequest) {
             totalCommissionPlusGst: monthlyTotals.totalDeduction,
         };
 
-        // ── 9. Generate invoice number ──
-        // Format: DLT-COM-YYMM-NNN
-        const yy = String(year).slice(-2);
+        // ── 9. Resolve the invoice number ──
+        // Reuse the number already issued for this vendor + month; only allocate
+        // a new one when the invoice is actually being issued (PDF download or an
+        // explicit issue=true). Previews never consume a number, which is what
+        // keeps the series contiguous.
         const mm = String(monthNum).padStart(2, '0');
+        const shouldIssue = format === 'pdf' || searchParams.get('issue') === 'true';
 
-        // Use counter from Firestore for sequential numbering
-        let invoiceSeq = 1;
-        try {
-            const counterRef = db.collection('counters').doc('commissionInvoices');
-            const counterDoc = await counterRef.get();
-            if (counterDoc.exists) {
-                invoiceSeq = ((counterDoc.data()?.count as number) || 0) + 1;
-            }
-            await counterRef.set({ count: invoiceSeq }, { merge: true });
-        } catch {
-            // Fallback: use vendorId hash
-            invoiceSeq = Math.abs(vendorId.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 999) + 1;
+        let issued = await findIssuedInvoice(vendorId, month);
+
+        if (!issued && shouldIssue) {
+            issued = await issueInvoiceNumber(vendorId, month, year, monthNum, {
+                vendorName: (vendorData.shopName || vendorData.fullName || 'Restaurant') as string,
+                vendorGstin: (vendorData.gstNumber || '') as string,
+                commissionRate,
+                orderCount: monthlyTotals.orders,
+                grossSales: monthlyTotals.grossSales,
+                commission: monthlyTotals.commission,
+                gstOnCommission: monthlyTotals.gstOnCommission,
+                totalDeduction: monthlyTotals.totalDeduction,
+                netPayout: monthlyTotals.netPayout,
+            });
         }
 
-        const invoiceNumber = `DLT-COM-${yy}${mm}-${String(invoiceSeq).padStart(3, '0')}`;
+        const invoiceNumber = issued?.invoiceNumber || COMMISSION_INVOICE_NOT_ISSUED;
 
         // ── 10. Build invoice date (last day of month) ──
         const invoiceDate = `${String(monthEnd.getDate()).padStart(2, '0')}-${mm}-${year}`;
@@ -214,6 +324,8 @@ export async function GET(request: NextRequest) {
                 state: (vendorData.state || vendorData.city || 'Uttar Pradesh') as string,
             },
             invoiceNumber,
+            invoiceIssued: !!issued?.issued,
+            invoiceIssuedAt: issued?.issuedAt || null,
             invoiceDate,
             hsnCode: COMMISSION_HSN_CODE,
             placeOfSupply: (vendorData.state || vendorData.city || 'Uttar Pradesh') as string,
@@ -287,6 +399,25 @@ export async function POST(request: NextRequest) {
         const settingsDoc = await db.collection('platformSettings').doc('commission').get();
         const platformDefault = settingsDoc.exists ? (settingsDoc.data()?.defaultRate ?? 15) : 15;
 
+        // Invoice numbers already issued for this billing month, keyed by vendor
+        const issuedByVendor: Record<string, { invoiceNumber: string; sequence: number; issuedAt: string | null }> = {};
+        try {
+            const issuedSnap = await db.collection(COMMISSION_INVOICES_COLLECTION)
+                .where('month', '==', month)
+                .get();
+            issuedSnap.docs.forEach(doc => {
+                const d = doc.data();
+                if (!d.vendorId || !d.invoiceNumber) return;
+                issuedByVendor[d.vendorId as string] = {
+                    invoiceNumber: d.invoiceNumber as string,
+                    sequence: (d.sequence as number) || parseCommissionInvoiceSequence(d.invoiceNumber as string),
+                    issuedAt: d.issuedAt?.toDate?.()?.toISOString?.() || null,
+                };
+            });
+        } catch (err) {
+            console.warn('Could not load issued commission invoices:', err);
+        }
+
         // Filter delivered orders in the month
         const monthOrders = allOrders.filter(order => {
             const status = ((order.status as string) || '').toLowerCase();
@@ -326,8 +457,13 @@ export async function POST(request: NextRequest) {
             const totalDeduction = Math.round((commission + gstOnCommission) * 100) / 100;
             const netPayout = Math.round((grossSales - totalDeduction) * 100) / 100;
 
+            const issued = issuedByVendor[v.id];
+
             return {
                 vendorId: v.id,
+                invoiceNumber: issued?.invoiceNumber || COMMISSION_INVOICE_NOT_ISSUED,
+                invoiceIssued: !!issued,
+                invoiceIssuedAt: issued?.issuedAt || null,
                 shopName: (v.shopName || v.fullName || 'Unknown') as string,
                 shopImageUrl: (v.shopImageUrl || v.profileImageUrl || '') as string,
                 city: (v.city || '') as string,

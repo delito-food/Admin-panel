@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
     ArrowLeft, Store, Phone, Mail, MapPin, Star, Power, Ban, CheckCircle,
     IndianRupee, UtensilsCrossed, Clock, FileText, Tag, ShoppingBag, Loader2,
-    Calendar, Award, AlertTriangle, Shield, Edit2, X, Check
+    Calendar, Award, AlertTriangle, Shield, Edit2, X, Check,
+    ChevronLeft, ChevronRight, Receipt, TrendingUp, XCircle
 } from 'lucide-react';
 import { apiPatch } from '@/hooks/useApi';
 
@@ -28,6 +29,46 @@ interface SpecialOffer {
     price: number;
     discount: number;
     imageUrl: string;
+}
+
+interface VendorOrder {
+    orderId: string;
+    invoiceNumber: string;
+    createdAt: string;
+    deliveredAt: string | null;
+    customerName: string;
+    customerPhone: string;
+    status: string;
+    paymentMode: string;
+    paymentStatus: string;
+    itemCount: number;
+    itemNames: string[];
+    itemTotal: number;
+    deliveryFee: number;
+    taxes: number;
+    total: number;
+    commission: number;
+    gstOnCommission: number;
+    totalDeduction: number;
+    vendorEarning: number;
+    refundStatus: string;
+    refundAmount: number;
+}
+
+interface VendorOrderStats {
+    totalOrders: number;
+    deliveredOrders: number;
+    cancelledOrders: number;
+    activeOrders: number;
+    grossSales: number;
+    netEarnings: number;
+    commissionPaid: number;
+    gstPaid: number;
+    averageOrderValue: number;
+    fulfilmentRate: number;
+    firstOrderAt: string | null;
+    lastOrderAt: string | null;
+    truncated: boolean;
 }
 
 interface VendorDetail {
@@ -114,6 +155,15 @@ export default function VendorDetailPage() {
     const [newFssai, setNewFssai] = useState('');
     const [savingFssai, setSavingFssai] = useState(false);
 
+    // ── Vendor order history ──
+    const [orders, setOrders] = useState<VendorOrder[]>([]);
+    const [orderStats, setOrderStats] = useState<VendorOrderStats | null>(null);
+    const [ordersLoading, setOrdersLoading] = useState(true);
+    const [ordersError, setOrdersError] = useState<string | null>(null);
+    const [orderStatusFilter, setOrderStatusFilter] = useState('All');
+    const [ordersPage, setOrdersPage] = useState(1);
+    const ORDERS_PER_PAGE = 10;
+
     useEffect(() => {
         const fetchVendor = async () => {
             try {
@@ -134,6 +184,45 @@ export default function VendorDetailPage() {
         };
         fetchVendor();
     }, [vendorId]);
+
+    useEffect(() => {
+        const fetchOrders = async () => {
+            setOrdersLoading(true);
+            setOrdersError(null);
+            try {
+                const response = await fetch(`/api/vendors/orders?vendorId=${encodeURIComponent(vendorId)}`);
+                const result = await response.json();
+                if (result.success) {
+                    setOrders(result.data.orders || []);
+                    setOrderStats(result.data.stats || null);
+                } else {
+                    setOrdersError(result.error || 'Failed to load order history');
+                }
+            } catch {
+                setOrdersError('Network error while loading order history');
+            } finally {
+                setOrdersLoading(false);
+            }
+        };
+        fetchOrders();
+    }, [vendorId]);
+
+    const orderStatuses = useMemo(
+        () => ['All', ...Array.from(new Set(orders.map(o => o.status))).sort()],
+        [orders]
+    );
+
+    const filteredOrders = useMemo(
+        () => orderStatusFilter === 'All' ? orders : orders.filter(o => o.status === orderStatusFilter),
+        [orders, orderStatusFilter]
+    );
+
+    const orderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
+    const safeOrdersPage = Math.min(ordersPage, orderTotalPages);
+    const pagedOrders = filteredOrders.slice(
+        (safeOrdersPage - 1) * ORDERS_PER_PAGE,
+        safeOrdersPage * ORDERS_PER_PAGE
+    );
 
     const toggleOnline = async () => {
         if (!vendor || updating) return;
@@ -384,12 +473,232 @@ export default function VendorDetailPage() {
 
             {/* Stats Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-                <StatCard title="Total Orders" value={vendor.totalOrders || 0} icon={ShoppingBag} color="primary" />
-                <StatCard title="Revenue" value={formatCurrency(vendor.totalEarnings || 0)} icon={IndianRupee} color="success" />
+                <StatCard title="Total Orders" value={orderStats?.totalOrders ?? vendor.totalOrders ?? 0} icon={ShoppingBag} color="primary" />
+                <StatCard title="Net Earnings" value={formatCurrency(orderStats?.netEarnings ?? vendor.totalEarnings ?? 0)} icon={IndianRupee} color="success" />
                 <StatCard title="Menu Items" value={vendor.menuItemsCount || vendor.menuItems?.length || 0} icon={UtensilsCrossed} color="warning" />
                 <StatCard title="Avg. Delivery" value={`${vendor.averageDeliveryTime || 30}m`} icon={Clock} color="info" />
                 <StatCard title="Min. Order" value={formatCurrency(vendor.minimumOrderAmount || 0)} icon={Tag} color="error" />
             </div>
+
+            {/* ── Order History ── */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ overflow: 'hidden' }}>
+                <div style={{
+                    padding: '18px 20px', borderBottom: '1px solid var(--border)',
+                    display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                }}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--foreground)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Receipt size={16} style={{ color: 'var(--primary)' }} /> Order History
+                        {!ordersLoading && (
+                            <span style={{
+                                padding: '2px 10px', borderRadius: 100, fontSize: '0.7rem', fontWeight: 700,
+                                background: 'rgba(244,81,30,0.12)', color: 'var(--primary)',
+                            }}>
+                                {filteredOrders.length}
+                            </span>
+                        )}
+                    </h3>
+
+                    {orders.length > 0 && (
+                        <select
+                            value={orderStatusFilter}
+                            onChange={(e) => { setOrderStatusFilter(e.target.value); setOrdersPage(1); }}
+                            style={{
+                                padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)',
+                                background: 'var(--surface)', color: 'var(--foreground)',
+                                fontSize: '0.78rem', cursor: 'pointer', outline: 'none',
+                            }}
+                        >
+                            {orderStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    )}
+                </div>
+
+                {/* Order performance summary */}
+                {orderStats && orderStats.totalOrders > 0 && (
+                    <div style={{
+                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                        gap: 1, background: 'var(--border)', borderBottom: '1px solid var(--border)',
+                    }}>
+                        {[
+                            { label: 'Delivered', value: String(orderStats.deliveredOrders), icon: CheckCircle, color: '#10B981' },
+                            { label: 'Cancelled', value: String(orderStats.cancelledOrders), icon: XCircle, color: '#EF4444' },
+                            { label: 'In Progress', value: String(orderStats.activeOrders), icon: Clock, color: '#F59E0B' },
+                            { label: 'Gross Sales', value: formatCurrency(orderStats.grossSales), icon: IndianRupee, color: '#6366F1' },
+                            { label: 'Commission + GST', value: formatCurrency(orderStats.commissionPaid + orderStats.gstPaid), icon: Award, color: '#EC4899' },
+                            { label: 'Avg. Order', value: formatCurrency(orderStats.averageOrderValue), icon: TrendingUp, color: '#0EA5E9' },
+                            { label: 'Fulfilment', value: `${orderStats.fulfilmentRate}%`, icon: Shield, color: '#10B981' },
+                        ].map(stat => (
+                            <div key={stat.label} style={{ background: 'var(--glass-bg)', padding: '12px 14px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                                    <stat.icon size={12} color={stat.color} />
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                        {stat.label}
+                                    </span>
+                                </div>
+                                <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--foreground)', margin: 0 }}>{stat.value}</p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Table */}
+                <div style={{ padding: ordersLoading || filteredOrders.length === 0 ? 20 : 0 }}>
+                    {ordersLoading ? (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+                            <Loader2 className="w-7 h-7 animate-spin" style={{ color: 'var(--primary)' }} />
+                        </div>
+                    ) : ordersError ? (
+                        <div style={{ textAlign: 'center', padding: '32px 0', color: '#EF4444', fontSize: '0.85rem' }}>
+                            <AlertTriangle size={32} style={{ margin: '0 auto 10px', opacity: 0.7 }} />
+                            <p>{ordersError}</p>
+                        </div>
+                    ) : filteredOrders.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
+                            <ShoppingBag size={40} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
+                            <p>{orders.length === 0 ? 'This vendor has no orders yet' : 'No orders match this status'}</p>
+                        </div>
+                    ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                <thead>
+                                    <tr style={{ background: 'var(--surface)' }}>
+                                        {['Order', 'Date', 'Customer', 'Items', 'Item Total', 'Commission + GST', 'Vendor Earning', 'Payment', 'Status'].map((h, i) => (
+                                            <th
+                                                key={h}
+                                                style={{
+                                                    padding: '10px 14px', textAlign: i >= 4 && i <= 6 ? 'right' : 'left',
+                                                    fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.04em',
+                                                    textTransform: 'uppercase', color: 'var(--foreground-secondary)',
+                                                    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+                                                }}
+                                            >
+                                                {h}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pagedOrders.map(order => {
+                                        const statusLower = order.status.toLowerCase();
+                                        const statusColor =
+                                            statusLower === 'delivered' || statusLower === 'completed' ? '#10B981'
+                                                : statusLower.includes('cancel') || statusLower === 'expired' || statusLower === 'not responded' ? '#EF4444'
+                                                    : '#F59E0B';
+                                        return (
+                                            <tr
+                                                key={order.orderId}
+                                                style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                                                onClick={() => router.push(`/orders?orderId=${order.orderId}`)}
+                                            >
+                                                <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                                                    <span style={{ fontWeight: 600, color: 'var(--foreground)' }}>
+                                                        #{order.orderId.slice(-8).toUpperCase()}
+                                                    </span>
+                                                    <br />
+                                                    <span style={{ fontSize: '0.68rem', color: 'var(--foreground-secondary)', fontFamily: 'monospace' }}>
+                                                        {order.invoiceNumber}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', color: 'var(--foreground-secondary)', whiteSpace: 'nowrap' }}>
+                                                    {order.createdAt
+                                                        ? new Date(order.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                                        : '—'}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', color: 'var(--foreground)' }}>
+                                                    {order.customerName || 'Unknown'}
+                                                    {order.customerPhone && (
+                                                        <>
+                                                            <br />
+                                                            <span style={{ fontSize: '0.68rem', color: 'var(--foreground-secondary)' }}>{order.customerPhone}</span>
+                                                        </>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', color: 'var(--foreground-secondary)', maxWidth: 220 }}>
+                                                    <span style={{ fontWeight: 600, color: 'var(--foreground)' }}>{order.itemCount}</span>
+                                                    {order.itemNames.length > 0 && (
+                                                        <span
+                                                            title={order.itemNames.join(', ')}
+                                                            style={{ display: 'block', fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                        >
+                                                            {order.itemNames.join(', ')}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'right', color: 'var(--foreground)', whiteSpace: 'nowrap' }}>
+                                                    {formatCurrency(order.itemTotal)}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'right', color: '#EF4444', whiteSpace: 'nowrap' }}>
+                                                    −{formatCurrency(order.totalDeduction)}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: '#10B981', whiteSpace: 'nowrap' }}>
+                                                    {formatCurrency(order.vendorEarning)}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', color: 'var(--foreground-secondary)', whiteSpace: 'nowrap' }}>
+                                                    {order.paymentMode || '—'}
+                                                    {order.paymentStatus && (
+                                                        <>
+                                                            <br />
+                                                            <span style={{ fontSize: '0.68rem' }}>{order.paymentStatus}</span>
+                                                        </>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 100, fontSize: '0.68rem', fontWeight: 700,
+                                                        background: `${statusColor}1A`, color: statusColor,
+                                                    }}>
+                                                        {order.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+
+                {/* Pagination */}
+                {!ordersLoading && filteredOrders.length > ORDERS_PER_PAGE && (
+                    <div style={{
+                        padding: '12px 20px', borderTop: '1px solid var(--border)',
+                        display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    }}>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--foreground-secondary)' }}>
+                            Showing {(safeOrdersPage - 1) * ORDERS_PER_PAGE + 1}–
+                            {Math.min(safeOrdersPage * ORDERS_PER_PAGE, filteredOrders.length)} of {filteredOrders.length}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <button
+                                onClick={() => setOrdersPage(Math.max(1, safeOrdersPage - 1))}
+                                disabled={safeOrdersPage === 1}
+                                className="btn btn-outline"
+                                style={{ padding: '5px 10px', fontSize: '0.78rem', gap: 4, opacity: safeOrdersPage === 1 ? 0.45 : 1 }}
+                            >
+                                <ChevronLeft size={14} /> Prev
+                            </button>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--foreground)', fontWeight: 600 }}>
+                                {safeOrdersPage} / {orderTotalPages}
+                            </span>
+                            <button
+                                onClick={() => setOrdersPage(Math.min(orderTotalPages, safeOrdersPage + 1))}
+                                disabled={safeOrdersPage === orderTotalPages}
+                                className="btn btn-outline"
+                                style={{ padding: '5px 10px', fontSize: '0.78rem', gap: 4, opacity: safeOrdersPage === orderTotalPages ? 0.45 : 1 }}
+                            >
+                                Next <ChevronRight size={14} />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {orderStats?.truncated && (
+                    <p style={{ padding: '0 20px 14px', fontSize: '0.72rem', color: 'var(--foreground-secondary)', margin: 0 }}>
+                        Showing the most recent orders only — totals above cover the orders listed here.
+                    </p>
+                )}
+            </motion.div>
 
             {/* Documents & Menu/Offers */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>

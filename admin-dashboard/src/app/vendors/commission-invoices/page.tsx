@@ -25,6 +25,10 @@ import { authenticatedFetch } from '@/lib/api-client';
 
 interface VendorCommissionSummary {
     vendorId: string;
+    /** Invoice number already issued for this vendor + month, or "Not issued". */
+    invoiceNumber: string;
+    invoiceIssued: boolean;
+    invoiceIssuedAt: string | null;
     shopName: string;
     shopImageUrl: string;
     city: string;
@@ -59,6 +63,8 @@ interface PreviewData {
     platform: { name: string; gstin: string; fssaiLicense: string; address: string; email: string; website: string };
     vendor: { name: string; gstin: string; fssaiLicense: string; address: string; state: string };
     invoiceNumber: string;
+    invoiceIssued: boolean;
+    invoiceIssuedAt: string | null;
     invoiceDate: string;
     billingPeriod: string;
     commissionRate: number;
@@ -157,6 +163,13 @@ export default function CommissionInvoicesPage() {
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+
+            // Downloading issues the invoice number (once). Refresh so the newly
+            // allocated number shows in the list and in any open preview.
+            await fetchData(selectedMonth);
+            if (previewVendor?.vendorId === vendorId) {
+                await handlePreview(previewVendor);
+            }
         } catch {
             alert('Failed to download invoice. Please try again.');
         } finally {
@@ -203,7 +216,8 @@ export default function CommissionInvoicesPage() {
             list = list.filter(v =>
                 v.shopName.toLowerCase().includes(q) ||
                 v.city.toLowerCase().includes(q) ||
-                v.vendorId.toLowerCase().includes(q)
+                v.vendorId.toLowerCase().includes(q) ||
+                (v.invoiceIssued && v.invoiceNumber.toLowerCase().includes(q))
             );
         }
 
@@ -395,6 +409,7 @@ export default function CommissionInvoicesPage() {
                             <thead>
                                 <tr>
                                     <th>Vendor</th>
+                                    <th>Invoice No.</th>
                                     <th style={{ textAlign: 'center' }}>Rate</th>
                                     <th style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => handleSort('orders')}>
                                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -419,7 +434,7 @@ export default function CommissionInvoicesPage() {
                             <tbody>
                                 {filteredVendors.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
+                                        <td colSpan={9} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground-secondary)' }}>
                                             No vendors with orders found for {monthLabel}
                                         </td>
                                     </tr>
@@ -445,6 +460,24 @@ export default function CommissionInvoicesPage() {
                                                         <p style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', margin: 0 }}>{v.city}</p>
                                                     </div>
                                                 </div>
+                                            </td>
+                                            <td>
+                                                {v.invoiceIssued ? (
+                                                    <span
+                                                        title={v.invoiceIssuedAt ? `Issued ${new Date(v.invoiceIssuedAt).toLocaleString('en-IN')}` : undefined}
+                                                        style={{ fontFamily: 'monospace', fontSize: '0.75rem', fontWeight: 600, color: '#1B5E20' }}
+                                                    >
+                                                        {v.invoiceNumber}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{
+                                                        padding: '2px 8px', borderRadius: 100, fontSize: '0.68rem',
+                                                        fontWeight: 600, background: 'rgba(245,158,11,0.12)', color: '#B45309',
+                                                        whiteSpace: 'nowrap',
+                                                    }}>
+                                                        Not issued
+                                                    </span>
+                                                )}
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <span style={{
@@ -571,7 +604,23 @@ export default function CommissionInvoicesPage() {
                                         }}>
                                             <div>
                                                 <p style={{ fontSize: '0.7rem', color: '#2E7D32', fontWeight: 600, margin: '0 0 2px' }}>INVOICE NO</p>
-                                                <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1B5E20', margin: 0 }}>{previewData.invoiceNumber}</p>
+                                                {previewData.invoiceIssued ? (
+                                                    <>
+                                                        <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1B5E20', margin: 0 }}>{previewData.invoiceNumber}</p>
+                                                        {previewData.invoiceIssuedAt && (
+                                                            <p style={{ fontSize: '0.65rem', color: '#2E7D32', margin: '2px 0 0' }}>
+                                                                Issued {new Date(previewData.invoiceIssuedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                            </p>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#8D6E00', margin: 0 }}>Not issued yet</p>
+                                                        <p style={{ fontSize: '0.65rem', color: '#2E7D32', margin: '2px 0 0' }}>
+                                                            A number is assigned when you download the PDF
+                                                        </p>
+                                                    </>
+                                                )}
                                             </div>
                                             <div>
                                                 <p style={{ fontSize: '0.7rem', color: '#2E7D32', fontWeight: 600, margin: '0 0 2px' }}>DATE</p>

@@ -20,7 +20,19 @@ export async function GET(request: Request) {
 
         const { searchParams } = new URL(request.url);
         const status = searchParams.get('status');
-        const limit = Math.min(parseInt(searchParams.get('limit') || '1000'), 5000);
+
+        // ── Limit ──
+        // `limit=all` (or 0) returns the complete order register — the Orders
+        // page paginates client-side and needs every row to be present so that
+        // search, status filters and the page counts cover the whole history.
+        // Anything else is clamped to MAX_LIMIT as a safety valve.
+        const MAX_LIMIT = 20_000;
+        const rawLimit = (searchParams.get('limit') || '').trim().toLowerCase();
+        const parsedLimit = parseInt(rawLimit, 10);
+        const unlimited = rawLimit === 'all' || parsedLimit === 0;
+        const limit = unlimited
+            ? MAX_LIMIT
+            : Math.min(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : MAX_LIMIT, MAX_LIMIT);
 
         let query: FirebaseFirestore.Query = db.collection(collections.orders)
             .orderBy('createdAt', 'desc')

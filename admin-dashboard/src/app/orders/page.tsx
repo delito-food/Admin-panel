@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
@@ -17,6 +17,10 @@ import {
     Store,
     X,
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
     RefreshCw,
     ShoppingBag,
     TrendingUp,
@@ -47,13 +51,21 @@ const CHART_COLORS = ['#F4511E', '#FF9904', '#F6D59F', '#10B981', '#E9190C'];
 
 const statusFilters = ['All', 'Pending', 'Accepted', 'Preparing', 'Prepared', 'Sent for delivery', 'Delivered', 'Not Responded', 'Expired', 'Cancelled', 'Cancelled by Admin'];
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
 export default function OrdersPage() {
-    const { data: orders, loading, refetch } = useApi<Order[]>('/api/orders');
+    // `limit=all` — the full order register is fetched so that search, filters
+    // and pagination below operate on every order, not just the newest page.
+    const { data: orders, loading, refetch } = useApi<Order[]>('/api/orders?limit=all');
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [showFilterDropdown, setShowFilterDropdown] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
 
     // Admin cancel state
     const [showCancelModal, setShowCancelModal] = useState(false);
@@ -113,16 +125,46 @@ export default function OrdersPage() {
         return () => clearInterval(interval);
     }, [refetch]);
 
-    const filteredOrders = (orders || []).filter(order => {
-        const matchesSearch =
-            (order.orderId || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (order.customerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (order.vendorName || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const filteredOrders = useMemo(() => {
+        const q = searchQuery.trim().toLowerCase();
+        return (orders || []).filter(order => {
+            const matchesSearch = !q ||
+                (order.orderId || '').toLowerCase().includes(q) ||
+                (order.customerName || '').toLowerCase().includes(q) ||
+                (order.customerPhone || '').toLowerCase().includes(q) ||
+                (order.vendorName || '').toLowerCase().includes(q) ||
+                (order.invoiceNumber || '').toLowerCase().includes(q);
 
-        const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
+            const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
 
-        return matchesSearch && matchesStatus;
-    });
+            return matchesSearch && matchesStatus;
+        });
+    }, [orders, searchQuery, statusFilter]);
+
+    // ── Pagination derived values ──
+    const totalOrders = filteredOrders.length;
+    const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
+    const safePage = Math.min(currentPage, totalPages);
+    const startIndex = (safePage - 1) * pageSize;
+    const pagedOrders = useMemo(
+        () => filteredOrders.slice(startIndex, startIndex + pageSize),
+        [filteredOrders, startIndex, pageSize]
+    );
+    const rangeStart = totalOrders === 0 ? 0 : startIndex + 1;
+    const rangeEnd = Math.min(startIndex + pageSize, totalOrders);
+
+    // Compact page-number strip: 1 … 4 5 [6] 7 8 … 20
+    const pageNumbers = useMemo<(number | 'gap')[]>(() => {
+        if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+        const pages: (number | 'gap')[] = [1];
+        const from = Math.max(2, safePage - 1);
+        const to = Math.min(totalPages - 1, safePage + 1);
+        if (from > 2) pages.push('gap');
+        for (let p = from; p <= to; p++) pages.push(p);
+        if (to < totalPages - 1) pages.push('gap');
+        pages.push(totalPages);
+        return pages;
+    }, [safePage, totalPages]);
 
     const getStatusBadge = (status: string) => {
         switch (status.toLowerCase()) {
@@ -242,7 +284,7 @@ export default function OrdersPage() {
                         onClick={async () => {
                             try {
                                 await downloadAuthenticatedFile(
-                                    '/api/orders?format=xlsx&limit=5000',
+                                    '/api/orders?format=xlsx&limit=all',
                                     `Orders_${new Date().toISOString().slice(0, 10)}.xlsx`
                                 );
                             } catch (err) {
@@ -415,7 +457,7 @@ export default function OrdersPage() {
                     <div className="section-title">
                         <div className="icon"><Package size={18} /></div>
                         Order List
-                        <span className="section-badge">{filteredOrders.length}</span>
+                        <span className="section-badge">{totalOrders.toLocaleString('en-IN')}</span>
                     </div>
                 </div>
 
@@ -428,7 +470,7 @@ export default function OrdersPage() {
                                 type="text"
                                 placeholder="Search by order ID, customer, or vendor..."
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                                 className="input"
                             />
                         </div>
@@ -457,6 +499,7 @@ export default function OrdersPage() {
                                                 onClick={() => {
                                                     setStatusFilter(filter);
                                                     setShowFilterDropdown(false);
+                                                    setCurrentPage(1);
                                                 }}
                                                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${statusFilter === filter
                                                     ? 'bg-[var(--primary)] text-white'
@@ -491,13 +534,13 @@ export default function OrdersPage() {
                                 </p>
                             </motion.div>
                         ) : (
-                            filteredOrders.slice(0, 20).map((order, index) => (
+                            pagedOrders.map((order, index) => (
                                 <motion.div
                                     key={order.orderId}
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: -10 }}
-                                    transition={{ delay: index * 0.02 }}
+                                    transition={{ delay: Math.min(index, 12) * 0.02 }}
                                     className="glass-card p-6 cursor-pointer"
                                     onClick={() => setSelectedOrder(order)}
                                 >
@@ -548,6 +591,112 @@ export default function OrdersPage() {
                         )}
                     </AnimatePresence>
                 </div>
+
+                {/* Pagination */}
+                {totalOrders > 0 && (
+                    <div
+                        className="glass-card"
+                        style={{
+                            marginTop: 20, padding: '14px 18px',
+                            display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+                            justifyContent: 'space-between', gap: 16,
+                        }}
+                    >
+                        {/* Range summary */}
+                        <p style={{ fontSize: '0.82rem', color: 'var(--foreground-secondary)', margin: 0 }}>
+                            Showing <strong style={{ color: 'var(--foreground)' }}>{rangeStart.toLocaleString('en-IN')}</strong>
+                            {' – '}
+                            <strong style={{ color: 'var(--foreground)' }}>{rangeEnd.toLocaleString('en-IN')}</strong>
+                            {' of '}
+                            <strong style={{ color: 'var(--foreground)' }}>{totalOrders.toLocaleString('en-IN')}</strong>
+                            {' orders'}
+                            {statusFilter !== 'All' || searchQuery ? ' (filtered)' : ''}
+                        </p>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                            {/* Rows per page */}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--foreground-secondary)' }}>
+                                Rows
+                                <select
+                                    value={pageSize}
+                                    onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                                    style={{
+                                        padding: '5px 8px', borderRadius: 8,
+                                        border: '1px solid var(--border)', background: 'var(--surface)',
+                                        color: 'var(--foreground)', fontSize: '0.8rem', cursor: 'pointer', outline: 'none',
+                                    }}
+                                >
+                                    {PAGE_SIZE_OPTIONS.map(size => (
+                                        <option key={size} value={size}>{size}</option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            {/* Page controls */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <button
+                                    onClick={() => setCurrentPage(1)}
+                                    disabled={safePage === 1}
+                                    aria-label="First page"
+                                    className="btn btn-ghost btn-icon-sm"
+                                    style={{ opacity: safePage === 1 ? 0.4 : 1, cursor: safePage === 1 ? 'not-allowed' : 'pointer' }}
+                                >
+                                    <ChevronsLeft size={16} />
+                                </button>
+                                <button
+                                    onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
+                                    disabled={safePage === 1}
+                                    aria-label="Previous page"
+                                    className="btn btn-ghost btn-icon-sm"
+                                    style={{ opacity: safePage === 1 ? 0.4 : 1, cursor: safePage === 1 ? 'not-allowed' : 'pointer' }}
+                                >
+                                    <ChevronLeft size={16} />
+                                </button>
+
+                                {pageNumbers.map((p, i) =>
+                                    p === 'gap' ? (
+                                        <span key={`gap-${i}`} style={{ padding: '0 4px', color: 'var(--foreground-secondary)', fontSize: '0.8rem' }}>…</span>
+                                    ) : (
+                                        <button
+                                            key={p}
+                                            onClick={() => setCurrentPage(p)}
+                                            aria-current={p === safePage ? 'page' : undefined}
+                                            style={{
+                                                minWidth: 32, height: 32, borderRadius: 8, cursor: 'pointer',
+                                                fontSize: '0.8rem', fontWeight: p === safePage ? 700 : 500,
+                                                border: `1px solid ${p === safePage ? 'var(--primary)' : 'var(--border)'}`,
+                                                background: p === safePage ? 'var(--primary)' : 'transparent',
+                                                color: p === safePage ? '#fff' : 'var(--foreground-secondary)',
+                                                transition: 'all 0.15s',
+                                            }}
+                                        >
+                                            {p}
+                                        </button>
+                                    )
+                                )}
+
+                                <button
+                                    onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))}
+                                    disabled={safePage === totalPages}
+                                    aria-label="Next page"
+                                    className="btn btn-ghost btn-icon-sm"
+                                    style={{ opacity: safePage === totalPages ? 0.4 : 1, cursor: safePage === totalPages ? 'not-allowed' : 'pointer' }}
+                                >
+                                    <ChevronRight size={16} />
+                                </button>
+                                <button
+                                    onClick={() => setCurrentPage(totalPages)}
+                                    disabled={safePage === totalPages}
+                                    aria-label="Last page"
+                                    className="btn btn-ghost btn-icon-sm"
+                                    style={{ opacity: safePage === totalPages ? 0.4 : 1, cursor: safePage === totalPages ? 'not-allowed' : 'pointer' }}
+                                >
+                                    <ChevronsRight size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </section>
 
             {/* Order Detail Modal */}
