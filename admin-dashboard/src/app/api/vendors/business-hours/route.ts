@@ -8,6 +8,7 @@ import {
     withLegacyMirror,
     DEFAULT_TZ,
 } from '@/lib/scheduleEngine';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * Business-hours admin API.
@@ -46,7 +47,7 @@ function describe(vendorId: string, v: Record<string, unknown>) {
     };
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const vendorId = searchParams.get('vendorId');
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
     }
 }
 
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
     try {
         const body = await request.json();
         const { vendorId, businessHours, timezone, holidays, autoScheduleEnabled } = body;
@@ -176,3 +177,9 @@ export async function PUT(request: Request) {
         return NextResponse.json({ success: false, error: 'Failed to save business hours' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PUT = withAdmin(handlePUT);

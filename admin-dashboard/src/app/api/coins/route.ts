@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/coins
@@ -17,7 +18,7 @@ function tsToIso(v: any): string | null {
     return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         const allCustomers = await cachedCollection(collections.customers, 60000);
         const allWallets = await cachedCollection(collections.wallets, 30000);
@@ -98,3 +99,8 @@ export async function GET() {
         return NextResponse.json({ success: false, error: error?.message || 'Failed to fetch coin data' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

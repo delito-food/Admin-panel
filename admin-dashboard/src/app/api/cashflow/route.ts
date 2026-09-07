@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
+import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds, istMonthBoundsOffset } from '@/lib/fiscal';
 
 /**
  * Cashflow API — Unified financial overview
@@ -30,13 +32,18 @@ interface CashflowPeriod {
 }
 
 function getPeriods(): CashflowPeriod[] {
+    // All period boundaries in IST. Built with setHours() on a UTC host, the
+    // day started at 05:30 IST, so the morning trade was reported against
+    // the previous day.
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-    const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
+    const today = istTodayBounds(now).start;
+    const yesterday = istDaysAgoStart(1, now);
+    const istDayOfWeek = new Date(today.getTime() + 5.5 * 3600_000).getUTCDay();
+    const weekStart = istDaysAgoStart(istDayOfWeek, now);
+    const monthStart = istCurrentMonthBounds(now).start;
+    const lastMonth = istMonthBoundsOffset(1, now);
+    const lastMonthStart = lastMonth.start;
+    const lastMonthEnd = lastMonth.end;
 
     return [
         { label: 'today', startDate: today, endDate: now },
@@ -47,7 +54,7 @@ function getPeriods(): CashflowPeriod[] {
     ];
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         // Use cached collections (60s TTL) to reduce Firestore reads
         const orderDocs = await cachedCollection(collections.orders);
@@ -286,11 +293,8 @@ export async function GET() {
         }> = [];
 
         for (let i = 13; i >= 0; i--) {
-            const dayStart = new Date();
-            dayStart.setDate(dayStart.getDate() - i);
-            dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(dayStart);
-            dayEnd.setHours(23, 59, 59, 999);
+            const dayStart = istDaysAgoStart(i);
+            const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000 - 1);
 
             const dayOrders = allOrders.filter(o => o.date >= dayStart && o.date <= dayEnd);
             const delivered = dayOrders.filter(o => o.status === 'delivered' || o.status === 'completed');
@@ -345,3 +349,7 @@ export async function GET() {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

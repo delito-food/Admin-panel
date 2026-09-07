@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
@@ -10,7 +11,7 @@ const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
  * Returns all payment transactions for admin monitoring.
  * Query params: ?limit=50&type=payment_captured&flagged=true
  */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     // Authenticate admin
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) {
@@ -72,7 +73,7 @@ export async function GET(request: Request) {
  * Admin action: capture an authorized payment, or fetch payment details from Razorpay.
  * Body: { action: 'capture' | 'fetch_status', razorpayPaymentId: string, amount?: number }
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) {
         return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
@@ -148,3 +149,8 @@ export async function POST(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);

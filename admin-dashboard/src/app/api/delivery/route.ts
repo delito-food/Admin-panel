@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function GET() {
+async function handleGET() {
     try {
         // Get all delivery persons (cached)
         const deliveryDocs = await cachedCollection(collections.deliveryPersons);
@@ -120,7 +121,7 @@ export async function GET() {
     }
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { deliveryPersonId, updates } = body;
@@ -148,3 +149,9 @@ export async function PATCH(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

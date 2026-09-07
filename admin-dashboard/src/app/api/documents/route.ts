@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/documents
  * Returns document details for vendors and delivery partners
  */
-export async function GET() {
+async function handleGET() {
     try {
         const allVendors = await cachedCollection(collections.vendors);
         const allDP = await cachedCollection(collections.deliveryPersons);
@@ -101,6 +102,7 @@ export async function GET() {
     }
 }
 
-
-
-
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

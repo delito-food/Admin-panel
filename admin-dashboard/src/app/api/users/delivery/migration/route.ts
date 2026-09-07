@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const { oldDeliveryPersonId, newDeliveryPersonId } = await request.json();
 
@@ -71,3 +72,8 @@ export async function POST(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const POST = withAdmin(handlePOST);

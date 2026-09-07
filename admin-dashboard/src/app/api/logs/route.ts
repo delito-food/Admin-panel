@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
 // GET - Get admin action logs
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const limit = parseInt(searchParams.get('limit') || '100');
@@ -49,3 +50,7 @@ export async function GET(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

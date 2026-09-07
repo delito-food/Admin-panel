@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/special-offers
  * Fetch all special offers from BOTH collections (special_offers + specialOffers)
  * Vendors create in 'special_offers' (underscore), so we must read from there too
  */
-export async function GET() {
+async function handleGET() {
     try {
         // Fetch from BOTH collections to ensure we catch all offers
         const [snapshotUnderscore, snapshotCamel] = await Promise.all([
@@ -79,7 +80,7 @@ export async function GET() {
  * PATCH /api/special-offers
  * Admin updates a special offer (including banner image)
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { offerId, updates } = body;
@@ -158,7 +159,7 @@ export async function PATCH(request: Request) {
  * DELETE /api/special-offers
  * Admin deletes a special offer
  */
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const offerId = searchParams.get('offerId');
@@ -198,8 +199,9 @@ export async function DELETE(request: Request) {
     }
 }
 
-
-
-
-
-
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);
+export const DELETE = withAdmin(handleDELETE);

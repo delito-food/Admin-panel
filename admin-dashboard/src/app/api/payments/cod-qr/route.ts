@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * POST /api/payments/cod-qr
@@ -9,7 +10,7 @@ import { Timestamp } from 'firebase-admin/firestore';
  * Body: { orderId, amount, deliveryPersonId }
  * Returns: { paymentLinkId, shortUrl, expiresAt }
  */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
     try {
         // Read credentials at request time (not module load time) so Vercel env vars are available
         const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
@@ -70,3 +71,7 @@ export async function POST(req: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const POST = withAdmin(handlePOST);

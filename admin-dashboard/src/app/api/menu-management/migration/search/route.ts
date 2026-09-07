@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const oldVendorId = searchParams.get('oldVendorId');
@@ -28,3 +29,8 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: false, error: 'Failed to search data' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

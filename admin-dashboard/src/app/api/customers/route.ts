@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // Convert Firestore Timestamp or various date formats to ISO string
 function toISOString(val: unknown): string {
@@ -14,7 +15,7 @@ function toISOString(val: unknown): string {
     return '';
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         // Get all customers
         const customersSnapshot = await db.collection(collections.customers).get();
@@ -81,7 +82,7 @@ export async function GET() {
     }
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { customerId, updates } = body;
@@ -107,3 +108,9 @@ export async function PATCH(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

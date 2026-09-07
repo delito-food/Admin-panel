@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db, collections, invalidateCache } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json();
         const { oldVendorId, newVendorId, action } = body;
@@ -126,3 +127,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: 'Failed to execute migration' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const POST = withAdmin(handlePOST);

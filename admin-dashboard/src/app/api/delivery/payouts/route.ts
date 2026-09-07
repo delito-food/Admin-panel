@@ -1,12 +1,14 @@
+ 
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
+import { allLedgerBalances, divergence, type LedgerBalance } from '@/lib/ledger';
 
 // Constants for delivery earnings calculation
 const BASE_DELIVERY_FEE = 10; // ₹10 base
 const PER_KM_RATE = 6.5; // ₹6.5 per km
 
-export async function GET() {
+async function handleGET() {
     try {
         // Get all delivery partners
         const deliverySnapshot = await db.collection(collections.deliveryPersons).get();
@@ -220,6 +222,16 @@ export async function GET() {
         });
 
         // Build delivery partner payout data
+        // The ledger is the authority on what each partner is owed. Read once;
+        // the task-derived figures are the fallback for partners not yet
+        // backfilled, and the cross-check for those that are.
+        let ledgerBalances: Record<string, LedgerBalance> = {};
+        try {
+            ledgerBalances = await allLedgerBalances('deliveryPartner');
+        } catch (err) {
+            console.warn('[delivery/payouts] ledger unavailable, using task-derived figures:', err);
+        }
+
         const deliveryPartners = deliverySnapshot.docs.map(doc => {
             const data = doc.data();
             const earnings = deliveryEarnings[doc.id] || {
@@ -227,16 +239,41 @@ export async function GET() {
                 tips: 0, codCollected: 0, codSettled: 0, lastDeliveryDate: null, deliveryDetails: [],
             };
 
-            const docTotalEarnings = data.totalEarnings || 0;
-            const docTotalDeliveries = data.totalDeliveries || 0;
-            const calculatedTotalEarnings = earnings.totalEarnings + (data.incentives || 0);
-            const totalEarnings = Math.round(Math.max(calculatedTotalEarnings, docTotalEarnings) * 100) / 100;
-            const deliveryCount = Math.max(earnings.deliveryCount, docTotalDeliveries);
+            // ── Reconciliation ──
+            //
+            // Same rule as the vendor payouts screen: one source of truth, in a
+            // defined order — the append-only ledger where rows exist, otherwise
+            // the figures derived from delivery tasks. The counters on the
+            // delivery person document are a cache, compared and reported, never
+            // a value source.
+            //
+            // What this replaces took Math.max() of the derived and cached
+            // figures for earnings, delivery count AND paid amount, which quietly
+            // inflated every one of them the moment a cache went stale, and made
+            // the direction of the error impossible to reason about.
+            const docTotalEarnings = Math.round(((data.totalEarnings as number) || 0) * 100) / 100;
+            const docTotalDeliveries = (data.totalDeliveries as number) || 0;
+            const calculatedTotalEarnings = Math.round((earnings.totalEarnings + ((data.incentives as number) || 0)) * 100) / 100;
+            const payoutsCollectionPaid = Math.round(((paidByPartner[doc.id] || 0) as number) * 100) / 100;
+            const docPaidAmount = Math.round(((data.paidAmount as number) || 0) * 100) / 100;
 
-            // paidAmount = Math.max(collection sum, doc value) — preserves legacy payments
-            const payoutsCollectionPaid = paidByPartner[doc.id] || 0;
-            const docPaidAmount = (data.paidAmount as number) || 0;
-            const paidAmount = Math.round(Math.max(payoutsCollectionPaid, docPaidAmount) * 100) / 100;
+            const ledger = ledgerBalances[doc.id];
+            const balanceSource: 'ledger' | 'deliveries' = ledger && ledger.entryCount > 0 ? 'ledger' : 'deliveries';
+
+            const totalEarnings = balanceSource === 'ledger'
+                ? Math.round((ledger.balance + ledger.paidOut) * 100) / 100
+                : calculatedTotalEarnings;
+            const paidAmount = balanceSource === 'ledger' ? ledger.paidOut : payoutsCollectionPaid;
+            const deliveryCount = earnings.deliveryCount;
+
+            const discrepancies: string[] = [];
+            const earnGap = divergence(totalEarnings, docTotalEarnings);
+            const paidGapCollection = divergence(paidAmount, payoutsCollectionPaid);
+            const paidGapDoc = divergence(paidAmount, docPaidAmount);
+            if (docTotalEarnings > 0 && !earnGap.agrees) discrepancies.push(`earnings differ from the partner record by ₹${earnGap.gap.toFixed(2)}`);
+            if (!paidGapCollection.agrees) discrepancies.push(`paid differs from the payouts collection by ₹${paidGapCollection.gap.toFixed(2)}`);
+            if (!paidGapDoc.agrees) discrepancies.push(`paid differs from the partner record by ₹${paidGapDoc.gap.toFixed(2)}`);
+            if (docTotalDeliveries !== deliveryCount) discrepancies.push(`delivery count differs from the partner record by ${deliveryCount - docTotalDeliveries}`);
 
             // grossPendingAmount = what delivery person is actually owed (earnings - paid)
             // This is the number that should match the delivery app's "due" amount.
@@ -251,6 +288,11 @@ export async function GET() {
             const netPendingAmount = Math.round(Math.max(0, grossPendingAmount - codPending) * 100) / 100;
 
             return {
+                /** Where totalEarnings and paidAmount came from. */
+                balanceSource,
+                /** Empty when every record agrees. Each string names a gap to investigate. */
+                discrepancies,
+                ledgerEntryCount: ledger?.entryCount || 0,
                 deliveryPersonId: doc.id,
                 fullName: data.fullName || 'Unknown',
                 profilePhotoUrl: data.profileImageUrl || data.profilePhotoUrl || '',
@@ -310,3 +352,7 @@ export async function GET() {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

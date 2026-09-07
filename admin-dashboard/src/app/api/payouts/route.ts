@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { db, collections, sendPushNotification } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
+import { postLedgerEntry, type LedgerPartyType } from '@/lib/ledger';
 
 /**
  * Generates a system transaction ID: PLT-YYYYMMDD-XXXXXXXX
@@ -13,7 +15,7 @@ function generateTransactionId(): string {
 }
 
 /** GET — pending refunds for cancelled orders (Razorpay customer refunds, unchanged) */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
     try {
@@ -62,7 +64,7 @@ export async function GET(request: Request) {
  * POST /api/payouts — Issue payout (admin has initiated manual NEFT/UPI/Cash transfer)
  * Status = "issued". paidAmount is NOT updated yet — happens on confirmation.
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
     try {
@@ -152,7 +154,7 @@ export async function POST(request: Request) {
  * Generates system transaction ID. Updates paidAmount on recipient.
  * Vendor/delivery person will see receipt after this.
  */
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
     try {
@@ -179,7 +181,8 @@ export async function PUT(request: Request) {
         const recipientIdField = recipientType === 'vendor' ? 'vendorId' : 'deliveryPersonId';
         const recipientId = payoutData[recipientIdField] as string;
 
-        // Read recipient doc BEFORE confirming so we have currentPaid for Math.max calculation
+        // Read the recipient doc first so its cached counter can be compared
+        // against the ledger below.
         const recipientDoc = await db.collection(recipientCollection).doc(recipientId).get();
         const recipientDocData = recipientDoc.data() || {};
         const currentPaid = (recipientDocData.paidAmount as number) || 0;
@@ -203,8 +206,37 @@ export async function PUT(request: Request) {
             allCompletedSnap.docs.reduce((sum, d) => sum + ((d.data().amount as number) || 0), 0) * 100
         ) / 100;
 
-        // Math.max preserves legacy payments (currentPaid) that predate the payouts collection
-        const newPaidAmount = Math.round(Math.max(currentPaid + amount, collectionSum) * 100) / 100;
+        // The payout is now a ledger row. Posting is idempotent on the payout
+        // id, so confirming twice cannot debit twice.
+        try {
+            await postLedgerEntry({
+                partyType: (recipientType === 'vendor' ? 'vendor' : 'deliveryPartner') as LedgerPartyType,
+                partyId: recipientId,
+                entryType: 'PAYOUT',
+                amount: -Math.abs(amount),
+                sourceType: 'payout',
+                sourceId: payoutId,
+                description: `Payout confirmed, txn ${txnId}`,
+                createdBy: adminName || 'Delito Admin',
+            });
+        } catch (err) {
+            console.error('[payouts] ledger post failed for payout', payoutId, err);
+        }
+
+        // The sum of completed payout records is the deterministic figure, so
+        // the cached counter is set FROM it rather than to whichever of the two
+        // happened to be larger. Math.max() here silently preserved a stale
+        // counter, which then read back as money already paid.
+        const newPaidAmount = collectionSum;
+        const cacheGap = Math.round((currentPaid + amount - collectionSum) * 100) / 100;
+        if (Math.abs(cacheGap) >= 0.01) {
+            console.warn(
+                `[payouts] ${recipientType} ${recipientId}: cached paidAmount was out by ₹${cacheGap.toFixed(2)} ` +
+                `(cache ${(currentPaid + amount).toFixed(2)} vs payouts collection ${collectionSum.toFixed(2)}). ` +
+                'Reset from the payouts collection. Payments predating the collection must be backfilled ' +
+                'into the ledger with scripts/backfill-ledger.js.'
+            );
+        }
 
         // Compute updated pendingPayout from already-fetched doc data — no extra read needed
         const totalEarnings = (recipientDocData.totalEarnings as number) || 0;
@@ -252,7 +284,7 @@ export async function PUT(request: Request) {
 }
 
 /** DELETE /api/payouts — Cancel an issued (not yet confirmed) payout */
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
     try {
@@ -276,3 +308,10 @@ export async function DELETE(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PUT = withAdmin(handlePUT);
+export const DELETE = withAdmin(handleDELETE);

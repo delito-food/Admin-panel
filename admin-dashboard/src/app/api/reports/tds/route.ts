@@ -6,6 +6,8 @@ import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { withAdmin } from '@/lib/api-guard';
+import { istFinancialQuarter, istDayBoundsFromString } from '@/lib/fiscal';
 
 /**
  * TDS Report API — supports Section 194O and 194C
@@ -28,19 +30,12 @@ function roundTo2(n: number): number {
     return Math.round(n * 100) / 100;
 }
 
+// Quarter boundaries in IST. Built from local Date parts, these started and
+// ended 5h30m early on a UTC host, so deductions either side of a quarter
+// end were reported in the wrong return.
 function getCurrentFYQuarter(): { from: Date; to: Date; quarter: string } {
-    const now = new Date();
-    const month = now.getMonth();
-    const year = now.getFullYear();
-    if (month >= 3 && month <= 5) {
-        return { from: new Date(year, 3, 1), to: new Date(year, 5, 30, 23, 59, 59), quarter: `Q1 FY${year}-${year + 1}` };
-    } else if (month >= 6 && month <= 8) {
-        return { from: new Date(year, 6, 1), to: new Date(year, 8, 30, 23, 59, 59), quarter: `Q2 FY${year}-${year + 1}` };
-    } else if (month >= 9 && month <= 11) {
-        return { from: new Date(year, 9, 1), to: new Date(year, 11, 31, 23, 59, 59), quarter: `Q3 FY${year}-${year + 1}` };
-    } else {
-        return { from: new Date(year, 0, 1), to: new Date(year, 2, 31, 23, 59, 59), quarter: `Q4 FY${year - 1}-${year}` };
-    }
+    const q = istFinancialQuarter();
+    return { from: q.period.start, to: q.period.end, quarter: q.label };
 }
 
 export interface TDSVendorRow {
@@ -70,7 +65,7 @@ export interface TDSDeliveryRow {
     netAfterTDS: number;
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const section = searchParams.get('section') || '194O';
@@ -79,9 +74,10 @@ export async function GET(request: Request) {
         const defaultDates = getCurrentFYQuarter();
         const fromStr = searchParams.get('from');
         const toStr = searchParams.get('to');
-        const fromDate = fromStr ? new Date(fromStr) : defaultDates.from;
-        const toDate = toStr ? new Date(toStr) : defaultDates.to;
-        toDate.setHours(23, 59, 59, 999);
+        // User-supplied dates are IST calendar days. Parsing them with
+        // new Date() and then setHours() resolved them in the host's zone.
+        const fromDate = (fromStr && istDayBoundsFromString(fromStr)?.start) || defaultDates.from;
+        const toDate = (toStr && istDayBoundsFromString(toStr)?.end) || defaultDates.to;
         const quarter = defaultDates.quarter;
 
         if (section === '194O' || section === 'vendor-1pct') {
@@ -384,3 +380,8 @@ function generateDeliveryTDSPDF(rows: TDSDeliveryRow[], totals: any, quarter: st
 
     return Buffer.from(doc.output('arraybuffer'));
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

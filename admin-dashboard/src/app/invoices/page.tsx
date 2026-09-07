@@ -98,13 +98,12 @@ export default function InvoicesPage() {
         };
     }, [orders]);
 
-    // Download PDF — supports typed invoices
-    const handleDownloadPDF = async (orderId: string, type?: 'food' | 'delivery' | 'platform') => {
-        const dlKey = type ? `${orderId}-${type}` : orderId;
-        setDownloadingId(dlKey);
+    // Download the tax invoice. This is what ISSUES the serial — a preview
+    // never allocates one, which is what keeps the series free of gaps.
+    const handleDownloadPDF = async (orderId: string) => {
+        setDownloadingId(orderId);
         try {
-            const typeParam = type ? `&type=${type}` : '';
-            const res = await authenticatedFetch(`/api/invoices/${orderId}?format=pdf${typeParam}`);
+            const res = await authenticatedFetch(`/api/invoices/${orderId}?format=pdf`);
             if (!res.ok) {
                 const err = await res.json();
                 alert(err.error || 'Failed to generate invoice');
@@ -114,14 +113,15 @@ export default function InvoicesPage() {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            const label = type ? `-${type.charAt(0).toUpperCase() + type.slice(1)}` : '';
-            a.download = `Invoice-${orderId.slice(-8).toUpperCase()}${label}.pdf`;
+            a.download = `Invoice-${orderId.slice(-8).toUpperCase()}.pdf`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-        } catch {
-            alert('Failed to download invoice. Please try again.');
+            await refetch();
+        } catch (e) {
+            console.error(e);
+            alert('Failed to download invoice');
         } finally {
             setDownloadingId(null);
         }
@@ -532,34 +532,29 @@ export default function InvoicesPage() {
                                     >
                                         <Eye size={12} /> Preview
                                     </button>
-                                    {[
-                                        { type: 'food' as const, label: '🍽️ Food', color: '#D84315', disabled: false },
-                                        { type: 'delivery' as const, label: '🚴 Delivery', color: '#2196F3', disabled: (order.deliveryFee || 0) === 0 },
-                                        { type: 'platform' as const, label: '📋 Platform', color: '#4CAF50', disabled: (order.smallOrderSupportFee || 0) === 0 },
-                                    ].map(inv => (
-                                        <button
-                                            key={inv.type}
-                                            onClick={() => handleDownloadPDF(order.orderId, inv.type)}
-                                            disabled={inv.disabled || downloadingId === `${order.orderId}-${inv.type}`}
-                                            title={inv.disabled ? `No ${inv.type} fee for this order` : `Download ${inv.label} Invoice`}
-                                            style={{
-                                                display: 'flex', alignItems: 'center', gap: 3,
-                                                padding: '5px 8px', borderRadius: 6, border: 'none',
-                                                background: inv.color, color: 'white',
-                                                fontSize: '0.65rem', fontWeight: 600,
-                                                cursor: inv.disabled ? 'not-allowed' : (downloadingId === `${order.orderId}-${inv.type}` ? 'wait' : 'pointer'),
-                                                opacity: inv.disabled ? 0.35 : (downloadingId === `${order.orderId}-${inv.type}` ? 0.6 : 1),
-                                                transition: 'all 0.15s',
-                                            }}
-                                        >
-                                            {downloadingId === `${order.orderId}-${inv.type}` ? (
-                                                <Loader2 size={11} className="animate-spin" />
-                                            ) : (
-                                                <Download size={11} />
-                                            )}
-                                            {inv.label}
-                                        </button>
-                                    ))}
+                                    {/* One order, one tax invoice. Under GST s.9(5) Delito is the supplier of
+                                        record for food and delivery alike, so the three separately-labelled
+                                        downloads — which shared one serial and did not sum back to the order —
+                                        are replaced by a single document. */}
+                                    <button
+                                        onClick={() => handleDownloadPDF(order.orderId)}
+                                        disabled={downloadingId === order.orderId}
+                                        title="Download tax invoice"
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: 4,
+                                            padding: '5px 10px', borderRadius: 6, border: 'none',
+                                            background: '#D84315', color: 'white',
+                                            fontSize: '0.65rem', fontWeight: 600,
+                                            cursor: downloadingId === order.orderId ? 'wait' : 'pointer',
+                                            opacity: downloadingId === order.orderId ? 0.6 : 1,
+                                            transition: 'all 0.15s',
+                                        }}
+                                    >
+                                        {downloadingId === order.orderId
+                                            ? <Loader2 size={11} className="animate-spin" />
+                                            : <Download size={11} />}
+                                        Invoice
+                                    </button>
                                 </div>
                             </motion.div>
                         );
@@ -597,27 +592,23 @@ export default function InvoicesPage() {
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                                    {[
-                                        { type: 'food' as const, label: '🍽️ Food', color: '#D84315' },
-                                        { type: 'delivery' as const, label: '🚴 Delivery', color: '#2196F3' },
-                                        { type: 'platform' as const, label: '📋 Platform', color: '#4CAF50' },
-                                    ].map(inv => (
-                                        <button
-                                            key={inv.type}
-                                            onClick={() => handleDownloadPDF(previewOrder.orderId, inv.type)}
-                                            disabled={downloadingId === `${previewOrder.orderId}-${inv.type}`}
-                                            style={{
-                                                display: 'flex', alignItems: 'center', gap: 5,
-                                                padding: '7px 12px', borderRadius: 8, border: 'none',
-                                                background: inv.color, color: 'white',
-                                                fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
-                                                opacity: downloadingId === `${previewOrder.orderId}-${inv.type}` ? 0.6 : 1,
-                                            }}
-                                        >
-                                            {downloadingId === `${previewOrder.orderId}-${inv.type}` ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                                            {inv.label}
-                                        </button>
-                                    ))}
+                                    {/* Downloading is what issues the serial — see the draft label above. */}
+                                    <button
+                                        onClick={() => handleDownloadPDF(previewOrder.orderId)}
+                                        disabled={downloadingId === previewOrder.orderId}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: 5,
+                                            padding: '7px 14px', borderRadius: 8, border: 'none',
+                                            background: '#D84315', color: 'white',
+                                            fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
+                                            opacity: downloadingId === previewOrder.orderId ? 0.6 : 1,
+                                        }}
+                                    >
+                                        {downloadingId === previewOrder.orderId
+                                            ? <Loader2 size={13} className="animate-spin" />
+                                            : <Download size={13} />}
+                                        Download Tax Invoice
+                                    </button>
                                     <button onClick={() => { setPreviewOrder(null); setPreviewData(null); }} className="btn btn-ghost btn-icon-sm">
                                         <X size={20} />
                                     </button>
@@ -648,7 +639,15 @@ export default function InvoicesPage() {
                                                 </div>
                                                 <div style={{ textAlign: 'right' }}>
                                                     <p style={{ fontSize: '1rem', fontWeight: 700 }}>{previewData.invoiceType}</p>
-                                                    <p style={{ fontSize: '0.78rem', opacity: 0.8, marginTop: 2 }}>{previewData.invoiceNumber}</p>
+                                                    {previewData.invoiceNumber ? (
+                                                        <p style={{ fontSize: '0.78rem', opacity: 0.8, marginTop: 2 }}>{previewData.invoiceNumber}</p>
+                                                    ) : (
+                                                        // No serial is allocated for a preview — one is issued on download,
+                                                        // which is what keeps the series free of abandoned-preview gaps.
+                                                        <p style={{ fontSize: '0.72rem', opacity: 0.7, marginTop: 2, fontStyle: 'italic' }}>
+                                                            Draft — number issued on download
+                                                        </p>
+                                                    )}
                                                     <p style={{ fontSize: '0.72rem', opacity: 0.7, marginTop: 2 }}>{previewData.invoiceDate}</p>
                                                 </div>
                                             </div>

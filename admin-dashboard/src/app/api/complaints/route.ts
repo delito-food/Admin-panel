@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * Normalise the photo evidence attached by the customer app.
@@ -79,7 +80,7 @@ interface ComplaintData {
 }
 
 // Get all complaints
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const status = searchParams.get('status');
@@ -174,7 +175,7 @@ export async function GET(request: Request) {
 }
 
 // Update complaint status or add resolution
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { complaintId, status, resolution, adminNotes, priority } = body;
@@ -232,3 +233,8 @@ export async function PATCH(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

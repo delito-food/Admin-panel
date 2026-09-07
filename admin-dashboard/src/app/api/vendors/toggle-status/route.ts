@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db, collections, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * PATCH /api/vendors/toggle-status
  * Admin toggles vendor online/offline status
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { vendorId, isOnline, reason, adminId } = body;
@@ -70,3 +71,7 @@ export async function PATCH(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const PATCH = withAdmin(handlePATCH);

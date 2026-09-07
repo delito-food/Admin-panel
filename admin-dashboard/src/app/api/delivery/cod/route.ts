@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * Tamper-free COD Settlement Logic
@@ -14,7 +16,7 @@ import { Timestamp } from 'firebase-admin/firestore';
  * Those fields are only updated as a convenience mirror.
  */
 
-export async function GET() {
+async function handleGET() {
     try {
         // Use cached collections (60s TTL) to avoid quota exhaustion
         const deliveryDocs = await cachedCollection(collections.deliveryPersons);
@@ -280,7 +282,7 @@ export async function GET() {
  * - Create a settlement receipt in codSettlements
  * - Mirror update the deliveryPerson document (convenience only)
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json();
         const { deliveryPersonId, deliveryPersonName, amount, method, notes, orderIds } = body;
@@ -383,16 +385,39 @@ export async function POST(request: Request) {
             });
         }
 
-        // Use the higher of computed pending vs requested amount — trust the delivery app
-        // which reads directly from deliveryTasks (the source of truth for COD collection)
-        const effectivePending = Math.max(actualPending, amount);
-
-        if (amount > effectivePending + 1) { // +1 for floating point tolerance
+        // The over-settlement guard is checked against the COD actually
+        // recorded as collected.
+        //
+        // It used to compare the request against Math.max(actualPending,
+        // amount), which is >= amount by construction — so the condition below
+        // could never be true and ANY settlement amount was accepted, however
+        // large. A partner could be recorded as having settled cash they never
+        // collected.
+        //
+        // If the delivery app genuinely knows about collections this server has
+        // not seen, the caller may pass force: true, which is recorded on the
+        // settlement rather than hidden.
+        const forceSettle = body.force === true;
+        if (amount > actualPending + 1 && !forceSettle) { // +1 for floating point tolerance
             return NextResponse.json(
-                { success: false, error: `Settlement amount ₹${amount} exceeds actual pending ₹${Math.round(effectivePending)}` },
-                { status: 400 }
+                {
+                    success: false,
+                    error: `Settlement of ₹${amount} exceeds the ₹${Math.round(actualPending)} of COD recorded as collected by this partner. ` +
+                        'Re-sync the delivery tasks, or resend with force: true to settle anyway.',
+                    recordedPending: Math.round(actualPending * 100) / 100,
+                    requested: amount,
+                    canForce: true,
+                },
+                { status: 409 }
             );
         }
+        if (forceSettle && amount > actualPending + 1) {
+            console.warn(
+                `[cod] forced settlement of ₹${amount} against ₹${actualPending.toFixed(2)} recorded pending ` +
+                '— the deliveryTasks records disagree with the delivery app.'
+            );
+        }
+        const effectivePending = Math.max(actualPending, amount);
 
         // Replace actualPending with effectivePending for downstream logic
         actualPending = effectivePending;
@@ -555,7 +580,7 @@ export async function POST(request: Request) {
  * PATCH: Admin manually marks amount as settled (override)
  * Used when admin wants to reconcile without actual payment flow
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { settlementId, action, notes } = body;
@@ -643,7 +668,7 @@ export async function PATCH(request: Request) {
  * PUT: Review QR COD payments
  * Admin marks a QR payment as reviewed (confirmed received) or rejected.
  */
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
     try {
         const body = await request.json();
         const { orderId, status: reviewStatus } = body; // status: 'reviewed' or 'rejected'
@@ -734,3 +759,11 @@ export async function PUT(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PUT = withAdmin(handlePUT);
+export const PATCH = withAdmin(handlePATCH);

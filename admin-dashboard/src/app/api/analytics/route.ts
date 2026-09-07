@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
+import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds } from '@/lib/fiscal';
 
 // Platform commission rates
 const PLATFORM_COMMISSION_RATE = 0.15; // 15%
@@ -63,24 +65,18 @@ interface AnalyticsData {
     }>;
 }
 
+// All period boundaries in IST. Built with setHours() on a UTC host, the
+// day started at 05:30 IST, so the morning trade was reported against
+// the previous day.
 function getDateRanges() {
-    const now = new Date();
-
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - 7);
-    weekStart.setHours(0, 0, 0, 0);
-
-    const monthStart = new Date(now);
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    return { todayStart, weekStart, monthStart };
+    return {
+        todayStart: istTodayBounds().start,
+        weekStart: istDaysAgoStart(7),
+        monthStart: istCurrentMonthBounds().start,
+    };
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         const { todayStart, weekStart, monthStart } = getDateRanges();
 
@@ -386,3 +382,7 @@ export async function GET() {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

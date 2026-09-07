@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // Required document keys
 const REQUIRED_DOC_KEYS = ['fssai', 'pan', 'gst', 'bank', 'menuPhoto'];
@@ -23,7 +24,7 @@ const DOC_LABELS: Record<string, string> = {
 };
 
 // GET pending vendors for verification (with menu items + document statuses)
-export async function GET() {
+async function handleGET() {
     try {
         const snapshot = await db.collection(collections.vendors)
             .where('isVerified', '==', false)
@@ -114,7 +115,7 @@ export async function GET() {
 }
 
 // PATCH to approve/reject vendor OR review individual documents
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { vendorId, action, notes, documentKey, documentAction, documentNote, messageAction, messageText, messageDocKey } = body;
@@ -253,3 +254,8 @@ export async function PATCH(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

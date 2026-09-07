@@ -3,8 +3,10 @@ import { collections, cachedCollection } from '@/lib/firebase-admin';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
 import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
+import { withAdmin } from '@/lib/api-guard';
+import { istDayBoundsFromString, istMonthKey } from '@/lib/fiscal';
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const startDate = searchParams.get('startDate');
@@ -93,15 +95,15 @@ export async function GET(request: Request) {
             const dateObj = orderDate instanceof Date ? orderDate : new Date(orderDate);
 
             // Apply date filters
+            // IST day bounds — setHours() on a UTC host starts the day at
+            // 05:30 IST and drops that morning's refunds from the period.
             if (startDate) {
-                const start = new Date(startDate);
-                start.setHours(0, 0, 0, 0);
-                if (dateObj < start) return;
+                const b = istDayBoundsFromString(startDate);
+                if (b && dateObj < b.start) return;
             }
             if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                if (dateObj > end) return;
+                const b = istDayBoundsFromString(endDate);
+                if (b && dateObj > b.end) return;
             }
 
             const vendorId = (order.vendorId as string) || '';
@@ -136,7 +138,7 @@ export async function GET(request: Request) {
             });
 
             // Monthly aggregation
-            const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+            const monthKey = istMonthKey(dateObj);
             const monthName = dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
 
             if (!monthlyRefunds[monthKey]) {
@@ -240,3 +242,7 @@ export async function GET(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

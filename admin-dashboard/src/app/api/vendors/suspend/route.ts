@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // Suspension reasons enum for consistency
 export const SUSPENSION_REASONS = {
@@ -17,7 +18,7 @@ export const SUSPENSION_REASONS = {
 };
 
 // POST - Suspend a vendor
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json();
         const { vendorId, reason, notes, adminId } = body;
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
 }
 
 // DELETE - Unsuspend/Reinstate a vendor
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const vendorId = searchParams.get('vendorId');
@@ -165,7 +166,7 @@ export async function DELETE(request: Request) {
 }
 
 // GET - Get all suspended vendors
-export async function GET() {
+async function handleGET() {
     try {
         const snapshot = await db.collection(collections.vendors)
             .where('isSuspended', '==', true)
@@ -202,3 +203,9 @@ export async function GET() {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const DELETE = withAdmin(handleDELETE);

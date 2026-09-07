@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections, countDocuments, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
+import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds } from '@/lib/fiscal';
 
 // Platform rate constants
 const COMMISSION_RATE = 0.15;      // 15% commission on food subtotal
@@ -141,19 +143,18 @@ function roundAccum(acc: PeriodAccumulator): PeriodAccumulator {
     };
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         // Date calculations
+        // All period boundaries in IST. Built with setHours() on a UTC host, the
+        // day started at 05:30 IST, so the morning trade was reported against
+        // the previous day.
         const now = new Date();
-        const today = new Date(now);
-        today.setHours(0, 0, 0, 0);
-
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay());
-        weekStart.setHours(0, 0, 0, 0);
-
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
+        const today = istTodayBounds(now).start;
+        // Week starts on the IST Sunday.
+        const istDayOfWeek = new Date(today.getTime() + 5.5 * 3600_000).getUTCDay();
+        const weekStart = istDaysAgoStart(istDayOfWeek, now);
+        const monthStart = istCurrentMonthBounds(now).start;
 
         // Get ALL data from cached collections (60s TTL) — single source of truth
         const allOrders = await cachedCollection(collections.orders);
@@ -404,3 +405,8 @@ export async function GET() {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase-admin';
 import { verifyApiAuth, unauthorizedResponse } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * Hero Banner API
@@ -105,7 +106,7 @@ function normalise(id: string, data: FirebaseFirestore.DocumentData): HeroBanner
 }
 
 /** GET /api/hero-banners — list every banner (active and inactive) + config */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return unauthorizedResponse(auth.error);
 
@@ -132,7 +133,7 @@ export async function GET(request: Request) {
 }
 
 /** POST /api/hero-banners — create a banner */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return unauthorizedResponse(auth.error);
 
@@ -197,7 +198,7 @@ export async function POST(request: Request) {
  *   { reorder: [id, id, …] } → rewrite sortOrder to match the array order
  *   { config: {…} }          → update rotation / enabled config
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return unauthorizedResponse(auth.error);
 
@@ -284,7 +285,7 @@ export async function PATCH(request: Request) {
 }
 
 /** DELETE /api/hero-banners?id=… */
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
     const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return unauthorizedResponse(auth.error);
 
@@ -305,3 +306,11 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ success: false, error: message }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PATCH = withAdmin(handlePATCH);
+export const DELETE = withAdmin(handleDELETE);

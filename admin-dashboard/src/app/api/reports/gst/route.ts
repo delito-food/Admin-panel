@@ -1,9 +1,18 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { collections, cachedCollection } from '@/lib/firebase-admin';
 import { PLATFORM, GST_RATES, HSN_CODES } from '@/lib/invoice-constants';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
 import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
+import { withAdmin } from '@/lib/api-guard';
+import { computeOrderEconomics, isBillableStatus, isCancelledStatus } from '@/lib/pricing-engine';
+import { istDayBoundsFromString, istMonthKey, toDate } from '@/lib/fiscal';
+import { db } from '@/lib/firebase-admin';
+import { CREDIT_NOTES_COLLECTION } from '@/lib/credit-note';
+import { COMMISSION_DEBIT_NOTES_COLLECTION, DEBIT_NOTES_COLLECTION } from '@/lib/debit-note';
+import { INVOICE_SCHEMA_VERSION } from '@/lib/invoice-document';
+import { HOME_STATE_CODE, isInterState as computeInterState, placeOfSupplyLabel, resolveStateCode, splitTax } from '@/lib/gst';
 
 /**
  * GST report — structured to mirror the GSTR-1 / GSTR-3B return layout.
@@ -40,6 +49,11 @@ type Rated = { taxableValue: number; cgst: number; sgst: number; igst: number };
 
 interface GSTEntry {
     invoiceNumber: string;
+    /** ISO date the serial was allocated. Empty when no document exists yet. */
+    invoiceDateIssued?: string;
+    /** False when this row is costed from the order because no tax invoice
+     *  has been issued — it cannot be filed until one is. */
+    documentIssued?: boolean;
     orderId: string;
     vendorId: string;
     vendorName: string;
@@ -94,7 +108,12 @@ interface PeriodRow extends Rated {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function GET(request: Request) {
+/** Commission GST split by head, matching the invoice raised to the vendor. */
+function splitCommissionTax(amount: number, interState: boolean) {
+    return splitTax(amount, interState);
+}
+
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const startDate = searchParams.get('startDate');
@@ -113,6 +132,47 @@ export async function GET(request: Request) {
 
         const orderDocs = await cachedCollection(collections.orders);
         const invoiceNumbers = await getInvoiceNumberMap();
+
+        // ── The issued documents ──
+        //
+        // A return is filed from documents, not from orders. Where a stored tax
+        // invoice exists its frozen figures are authoritative and are used as
+        // they were issued; an order with no invoice is still costed, so the
+        // report stays usable, but it is counted separately and listed under
+        // `unbilled` because it cannot be filed until a document exists for it.
+        const storedInvoices: Record<string, any> = {};
+        try {
+            const snap = await db.collection('invoices').get();
+            snap.docs.forEach(d => {
+                const data = d.data();
+                if (data?.schemaVersion === INVOICE_SCHEMA_VERSION) storedInvoices[d.id] = data;
+            });
+        } catch (err) {
+            console.warn('[gst] could not load stored invoices:', err);
+        }
+
+        const creditNoteDocs: any[] = [];
+        try {
+            const snap = await db.collection(CREDIT_NOTES_COLLECTION).get();
+            snap.docs.forEach(d => creditNoteDocs.push({ id: d.id, ...d.data() }));
+        } catch (err) {
+            console.warn('[gst] could not load credit notes:', err);
+        }
+
+        // Debit notes RAISE an invoice's value (s.34(3)); credit notes reduce it.
+        // Both are Table 9B documents and both change the net liability, in
+        // opposite directions.
+        const debitNoteDocs: any[] = [];
+        for (const coll of [DEBIT_NOTES_COLLECTION, COMMISSION_DEBIT_NOTES_COLLECTION]) {
+            try {
+                const snap = await db.collection(coll).get();
+                snap.docs.forEach(d => debitNoteDocs.push({ id: d.id, ...d.data() }));
+            } catch (err) {
+                console.warn(`[gst] could not load ${coll}:`, err);
+            }
+        }
+
+        const unbilled: Array<{ orderId: string; vendorName: string; orderDate: string; invoiceValue: number }> = [];
 
         const gstEntries: GSTEntry[] = [];
         const monthly: Record<string, PeriodRow> = {};
@@ -146,7 +206,7 @@ export async function GET(request: Request) {
             hsn: string; description: string; uqc: string; quantity: number; rate: number; total: number;
         }> = {};
 
-        const addB2CS = (rate: number, taxable: number, cgst: number, sgst: number) => {
+        const addB2CS = (rate: number, taxable: number, cgst: number, sgst: number, igst = 0) => {
             if (taxable <= 0) return;
             const key = String(rate);
             if (!b2csBuckets[key]) {
@@ -155,12 +215,13 @@ export async function GET(request: Request) {
             b2csBuckets[key].taxableValue += taxable;
             b2csBuckets[key].cgst += cgst;
             b2csBuckets[key].sgst += sgst;
+            b2csBuckets[key].igst += igst;
             b2csBuckets[key].invoiceCount += 1;
         };
 
         const addHSN = (
             hsn: string, description: string, uqc: string, quantity: number,
-            rate: number, taxable: number, cgst: number, sgst: number
+            rate: number, taxable: number, cgst: number, sgst: number, igst = 0
         ) => {
             if (taxable <= 0) return;
             const key = `${hsn}|${rate}`;
@@ -175,7 +236,8 @@ export async function GET(request: Request) {
             b.taxableValue += taxable;
             b.cgst += cgst;
             b.sgst += sgst;
-            b.total += taxable + cgst + sgst;
+            b.igst += igst;
+            b.total += taxable + cgst + sgst + igst;
         };
 
         let earliestTs = Number.POSITIVE_INFINITY;
@@ -183,116 +245,126 @@ export async function GET(request: Request) {
         let cancelledCount = 0;
 
         orderDocs.forEach(order => {
-            const status = ((order.status as string) || '').toLowerCase();
-            const isCancelled = status === 'cancelled' || status === 'canceled';
+            const isCancelled = isCancelledStatus(order.status);
 
-            const orderDate = order.deliveredAt?.toDate?.() || order.createdAt?.toDate?.() || order.createdAt;
-            if (!orderDate) return;
-            const dateObj = orderDate instanceof Date ? orderDate : new Date(orderDate);
-            if (isNaN(dateObj.getTime())) return;
+            // The tax period is the delivery date, in IST. Computing bounds with
+            // setHours() on a UTC host shifted every boundary 5h30m early, which
+            // leaked orders placed between midnight and 05:30 IST into the
+            // previous month's return.
+            const dateObj = toDate(order.deliveredAt) || toDate(order.createdAt);
+            if (!dateObj) return;
 
             if (startDate) {
-                const start = new Date(startDate);
-                start.setHours(0, 0, 0, 0);
-                if (dateObj < start) return;
+                const bounds = istDayBoundsFromString(startDate);
+                if (bounds && dateObj < bounds.start) return;
             }
             if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                if (dateObj > end) return;
+                const bounds = istDayBoundsFromString(endDate);
+                if (bounds && dateObj > bounds.end) return;
             }
             if (vendorId && order.vendorId !== vendorId) return;
 
             // Cancelled orders are counted in the document summary only
             if (isCancelled) { cancelledCount++; return; }
-            if (status !== 'delivered' && status !== 'completed') return;
+            if (!isBillableStatus(order.status)) return;
 
             const orderVendorId = (order.vendorId as string) || '';
             const orderVendorName = vendorMap[orderVendorId] || (order.vendorName as string) || 'Unknown';
 
-            // ── Values ──
-            const itemTotal = (order.itemTotal ?? order.subtotal ?? 0) as number;
-            const originalItemTotal = (order.originalItemTotal as number) || itemTotal;
+            // ── Values, from the shared pricing engine ──
+            //
+            // Every figure below is the same one the customer tax invoice and
+            // the commission invoice print. Recomputing tax here by hand is what
+            // let the report declare a different commission base from the one
+            // actually billed.
+            //
+            // Discounts reduce the taxable value (s.15(3)), so the taxable
+            // amounts here are net of promo codes, coins and HungerGame rewards,
+            // matching the invoice issued for the same order.
+            const vendorStateCode = resolveStateCode(
+                vendorGstinMap[orderVendorId],
+                (order.deliveryState || order.customerState) as string | undefined
+            ) || HOME_STATE_CODE;
+            const orderInterState = computeInterState(HOME_STATE_CODE, vendorStateCode);
 
-            // Item-level discount computed from the lines, with the order-level
-            // originalItemTotal as a fallback (older orders only carry one of them).
-            const lineDiscount = ((order.items as any[]) || []).reduce((sum: number, it: any) => {
-                const qty = it?.quantity || 1;
-                const price = it?.price || 0;
-                const original = it?.originalPrice ?? price;
-                return sum + Math.max(0, (original - price) * qty);
-            }, 0);
-            const itemDiscount = Math.max(lineDiscount, Math.max(0, originalItemTotal - itemTotal));
-            const grossItemTotal = itemTotal + itemDiscount;
+            const economics = computeOrderEconomics(order, order.id, { interState: orderInterState });
 
-            // Post-supply discounts — do NOT reduce the taxable value (sec 15(3)(b))
-            const hgDeliveryDiscount = (order.hungerGameLevel2DeliveryDiscount as number) || 0;
-            const hgComponents = ((order.hungerGameLevel1Discount as number) || 0)
-                + ((order.hungerGameCouponDiscount as number) || 0)
-                + ((order.hungerGameLevel5Savings as number) || 0);
-            const hungerGameDiscount = hgComponents > 0
-                ? hgComponents
-                : Math.max(0, ((order.hungerGameDiscount as number) || 0) - hgDeliveryDiscount);
-            const deliveryDiscount = ((order.deliveryDiscount ?? order.discount ?? 0) as number) + hgDeliveryDiscount;
-            const postSupplyDiscount = hungerGameDiscount
-                + ((order.coinDiscount as number) || 0)
-                + ((order.promoDiscount as number) || 0)
-                + deliveryDiscount;
+            // A document already issued is frozen: its figures are what the
+            // customer holds and what must be filed, even if a rate or a
+            // rounding rule has changed since.
+            const issuedDoc = storedInvoices[order.id];
+            const documentIssued = !!issuedDoc;
+            const sourceComponents = documentIssued ? (issuedDoc.components as any[]) : economics.components;
 
-            const deliveryFee = (order.deliveryFee as number) || 0;
-            const platformFee = (order.smallOrderSupportFee as number) || 0;
+            const foodC = sourceComponents.find((c: any) => c.key === 'food');
+            const delC = sourceComponents.find((c: any) => c.key === 'delivery');
+            const pfC = sourceComponents.find((c: any) => c.key === 'platform');
 
-            // ── Tax ──
-            // Prefer the amounts actually charged by the app; fall back to rates.
-            const storedGstOnFood = (order.gstOnFood as number) || 0;
-            const foodGst = storedGstOnFood > 0 ? storedGstOnFood : r2(itemTotal * GST_ON_FOOD);
-            const serviceBase = deliveryFee + platformFee;
-            const storedGstOnServices = (order.gstOnServices as number) || 0;
-            const servicesGst = storedGstOnServices > 0 ? storedGstOnServices : r2(serviceBase * GST_ON_SERVICES);
-            const deliveryGst = serviceBase > 0 ? r2(servicesGst * deliveryFee / serviceBase) : 0;
-            const platformGst = r2(servicesGst - deliveryGst);
+            if (!documentIssued) {
+                unbilled.push({
+                    orderId: order.id,
+                    vendorName: orderVendorName,
+                    orderDate: dateObj.toISOString(),
+                    invoiceValue: economics.invoiceValue,
+                });
+            }
 
-            const commission = (order.vendorPlatformCut as number) > 0
-                ? (order.vendorPlatformCut as number)
-                : r2(originalItemTotal * DEFAULT_COMMISSION_RATE);
-            const gstOnCommission = (order.vendorGstOnPlatformCut as number) > 0
-                ? (order.vendorGstOnPlatformCut as number)
-                : r2(commission * GST_ON_COMMISSION);
+            const itemTotal = foodC?.taxableValue ?? 0;
+            const deliveryFee = delC?.taxableValue ?? 0;
+            const platformFee = pfC?.taxableValue ?? 0;
 
-            const half = (n: number) => r2(n / 2);
-            const foodCgst = half(foodGst), foodSgst = r2(foodGst - foodCgst);
-            const delCgst = half(deliveryGst), delSgst = r2(deliveryGst - delCgst);
-            const pfCgst = half(platformGst), pfSgst = r2(platformGst - pfCgst);
-            const comCgst = half(gstOnCommission), comSgst = r2(gstOnCommission - comCgst);
+            const foodCgst = foodC?.cgst ?? 0, foodSgst = foodC?.sgst ?? 0, foodIgst = foodC?.igst ?? 0;
+            const delCgst = delC?.cgst ?? 0, delSgst = delC?.sgst ?? 0, delIgst = delC?.igst ?? 0;
+            const pfCgst = pfC?.cgst ?? 0, pfSgst = pfC?.sgst ?? 0, pfIgst = pfC?.igst ?? 0;
+
+            const itemDiscount = r2(economics.discounts.filter(d => d.key === 'item').reduce((sum, d) => sum + d.amount, 0));
+            const orderLevelDiscount = r2(economics.discounts.filter(d => d.key !== 'item').reduce((sum, d) => sum + d.amount, 0));
+            // Field kept for the existing register columns. Under the current
+            // policy no discount is treated as post-supply, so this is the
+            // order-level discount that reduced the taxable value.
+            const postSupplyDiscount = orderLevelDiscount;
+            const grossItemTotal = r2((foodC?.grossTaxableValue ?? 0) + itemDiscount);
+
+            const commissionResult = economics.commission;
+            const commission = commissionResult.amount;
+            const gstOnCommission = commissionResult.gst;
+            const commissionTax = splitCommissionTax(gstOnCommission, orderInterState);
+            const comCgst = commissionTax.cgst, comSgst = commissionTax.sgst, comIgst = commissionTax.igst;
 
             const taxableValue = r2(itemTotal + deliveryFee + platformFee + commission);
             const cgst = r2(foodCgst + delCgst + pfCgst + comCgst);
             const sgst = r2(foodSgst + delSgst + pfSgst + comSgst);
-            const totalGst = r2(cgst + sgst);
+            const igst = r2(foodIgst + delIgst + pfIgst + comIgst);
+            const totalGst = r2(cgst + sgst + igst);
             const invoiceValue = r2(taxableValue + totalGst);
 
             // ── GSTR-1 buckets ──
-            addB2CS(GST_RATES.IGST, itemTotal, foodCgst, foodSgst);                    // 5%
-            addB2CS(18, deliveryFee + platformFee + commission,
-                r2(delCgst + pfCgst + comCgst), r2(delSgst + pfSgst + comSgst));       // 18%
+            // Commission is a B2B supply to a registered restaurant and belongs in
+            // GSTR-1 Table 4, invoice-wise against the vendor's GSTIN. It is kept
+            // out of the B2C bucket here; Phase 3 adds the Table 4 section proper.
+            addB2CS(5, itemTotal, foodCgst, foodSgst, foodIgst);
+            addB2CS(18, r2(deliveryFee + platformFee),
+                r2(delCgst + pfCgst), r2(delSgst + pfSgst), r2(delIgst + pfIgst));
 
             const itemQty = ((order.items as any[]) || [])
                 .reduce((s: number, it: any) => s + (it?.quantity || 0), 0);
-            addHSN(HSN_CODES.FOOD, 'Restaurant service (food supply)', 'NOS', itemQty, 5, itemTotal, foodCgst, foodSgst);
-            addHSN(HSN_CODES.DELIVERY, 'Courier / delivery service', 'NOS', deliveryFee > 0 ? 1 : 0, 18, deliveryFee, delCgst, delSgst);
-            addHSN(HSN_CODES.PLATFORM, 'Platform / convenience fee', 'NOS', platformFee > 0 ? 1 : 0, 18, platformFee, pfCgst, pfSgst);
-            addHSN('998399', 'Commission on restaurant sales', 'NOS', commission > 0 ? 1 : 0, 18, commission, comCgst, comSgst);
+            addHSN(HSN_CODES.FOOD, 'Restaurant service (food supply)', 'NOS', itemQty, 5, itemTotal, foodCgst, foodSgst, foodIgst);
+            addHSN(HSN_CODES.DELIVERY, 'Courier / delivery service', 'NOS', deliveryFee > 0 ? 1 : 0, 18, deliveryFee, delCgst, delSgst, delIgst);
+            addHSN(HSN_CODES.PLATFORM, 'Platform / convenience fee', 'NOS', platformFee > 0 ? 1 : 0, 18, platformFee, pfCgst, pfSgst, pfIgst);
+            addHSN('998399', 'Commission on restaurant sales', 'NOS', commission > 0 ? 1 : 0, 18, commission, comCgst, comSgst, comIgst);
 
             earliestTs = Math.min(earliestTs, dateObj.getTime());
             latestTs = Math.max(latestTs, dateObj.getTime());
 
             const entry: GSTEntry = {
-                invoiceNumber: invoiceNumberFor(invoiceNumbers, order.id),
+                invoiceNumber: (issuedDoc?.invoiceNumber as string) || invoiceNumberFor(invoiceNumbers, order.id),
+                invoiceDateIssued: (issuedDoc?.invoiceDate as string) || '',
+                documentIssued,
                 orderId: order.id,
                 vendorId: orderVendorId,
                 vendorName: orderVendorName,
                 orderDate: dateObj.toISOString(),
-                placeOfSupply: PLACE_OF_SUPPLY,
+                placeOfSupply: placeOfSupplyLabel(vendorStateCode),
                 grossItemTotal: r2(grossItemTotal),
                 itemDiscount: r2(itemDiscount),
                 postSupplyDiscount: r2(postSupplyDiscount),
@@ -304,7 +376,7 @@ export async function GET(request: Request) {
                 taxableValue,
                 cgst,
                 sgst,
-                igst: 0,
+                igst,
                 totalGst,
                 invoiceValue,
                 commission: r2(commission),
@@ -315,7 +387,7 @@ export async function GET(request: Request) {
             gstEntries.push(entry);
 
             // ── Tax period aggregation ──
-            const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+            const monthKey = istMonthKey(dateObj);
             if (!monthly[monthKey]) {
                 monthly[monthKey] = {
                     month: dateObj.toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
@@ -464,13 +536,138 @@ export async function GET(request: Request) {
             gstRate: GST_ON_COMMISSION * 100,
         };
 
+        // ── GSTR-1 Table 9B — credit notes issued in the period ──
+        //
+        // A credit note reverses output tax already declared on an invoice. It
+        // is reported separately and subtracted from the net liability, never
+        // netted into the invoice rows themselves.
+        const periodCreditNotes = creditNoteDocs.filter(cn => {
+            const d = toDate(cn.creditNoteDate);
+            if (!d) return false;
+            if (startDate) { const b = istDayBoundsFromString(startDate); if (b && d < b.start) return false; }
+            if (endDate) { const b = istDayBoundsFromString(endDate); if (b && d > b.end) return false; }
+            if (vendorId) {
+                const linked = gstEntries.find(e => e.orderId === cn.orderId);
+                if (!linked) return false;
+            }
+            return true;
+        });
+
+        const creditNoteRows = periodCreditNotes.map(cn => ({
+            creditNoteNumber: cn.creditNoteNumber as string,
+            creditNoteDate: cn.creditNoteDate as string,
+            originalInvoiceNumber: cn.originalInvoiceNumber as string,
+            originalInvoiceDate: cn.originalInvoiceDate as string,
+            orderId: cn.orderId as string,
+            reasonCode: cn.reasonCode as string,
+            reason: cn.reason as string,
+            scope: cn.scope as string,
+            placeOfSupply: cn.placeOfSupply as string,
+            taxableValue: r2(cn.totals?.taxableValue || 0),
+            cgst: r2(cn.totals?.cgst || 0),
+            sgst: r2(cn.totals?.sgst || 0),
+            igst: r2(cn.totals?.igst || 0),
+            totalTax: r2(cn.totals?.totalTax || 0),
+            creditValue: r2(cn.totals?.creditValue || 0),
+        })).sort((a, b) => (a.creditNoteNumber < b.creditNoteNumber ? 1 : -1));
+
+        const creditNoteTotals = creditNoteRows.reduce((acc, c) => ({
+            count: acc.count + 1,
+            taxableValue: r2(acc.taxableValue + c.taxableValue),
+            cgst: r2(acc.cgst + c.cgst),
+            sgst: r2(acc.sgst + c.sgst),
+            igst: r2(acc.igst + c.igst),
+            totalTax: r2(acc.totalTax + c.totalTax),
+            creditValue: r2(acc.creditValue + c.creditValue),
+        }), { count: 0, taxableValue: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0, creditValue: 0 });
+
+        const periodDebitNotes = debitNoteDocs.filter(dn => {
+            const d = toDate(dn.debitNoteDate);
+            if (!d) return false;
+            if (startDate) { const b = istDayBoundsFromString(startDate); if (b && d < b.start) return false; }
+            if (endDate) { const b = istDayBoundsFromString(endDate); if (b && d > b.end) return false; }
+            if (vendorId && dn.vendorId && dn.vendorId !== vendorId) return false;
+            return true;
+        });
+
+        const debitNoteRows = periodDebitNotes.map(dn => ({
+            debitNoteNumber: dn.debitNoteNumber as string,
+            debitNoteDate: dn.debitNoteDate as string,
+            originalInvoiceNumber: dn.originalInvoiceNumber as string,
+            originalInvoiceDate: dn.originalInvoiceDate as string,
+            target: dn.target as string,
+            vendorId: (dn.vendorId as string) || '',
+            billingMonth: (dn.billingMonth as string) || '',
+            reasonCode: dn.reasonCode as string,
+            reason: dn.reason as string,
+            ratePercent: r2(dn.ratePercent || 0),
+            taxableValue: r2(dn.totals?.taxableValue || 0),
+            cgst: r2(dn.totals?.cgst || 0),
+            sgst: r2(dn.totals?.sgst || 0),
+            igst: r2(dn.totals?.igst || 0),
+            totalTax: r2(dn.totals?.totalTax || 0),
+            debitValue: r2(dn.totals?.debitValue || 0),
+        })).sort((a, b) => (a.debitNoteNumber < b.debitNoteNumber ? 1 : -1));
+
+        const debitNoteTotals = debitNoteRows.reduce((acc, d) => ({
+            count: acc.count + 1,
+            taxableValue: r2(acc.taxableValue + d.taxableValue),
+            cgst: r2(acc.cgst + d.cgst),
+            sgst: r2(acc.sgst + d.sgst),
+            igst: r2(acc.igst + d.igst),
+            totalTax: r2(acc.totalTax + d.totalTax),
+            debitValue: r2(acc.debitValue + d.debitValue),
+        }), { count: 0, taxableValue: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0, debitValue: 0 });
+
+        // ── GSTR-1 Table 13 — documents issued ──
+        //
+        // Reported per series, from the serials actually allocated. A row here
+        // must be defensible against the counter, so `notIssued` counts orders
+        // in the period that carry no document at all — the gap that has to
+        // reach zero before the return can be filed.
+        const issuedSerials = gstEntries
+            .filter(e => e.documentIssued)
+            .map(e => e.invoiceNumber)
+            .filter(Boolean)
+            .sort();
+        const creditSerials = creditNoteRows.map(c => c.creditNoteNumber).filter(Boolean).sort();
+        const debitSerials = debitNoteRows.map(d => d.debitNoteNumber).filter(Boolean).sort();
+
         const documentSummary = {
             natureOfDocument: 'Invoices for outward supply',
-            from: gstEntries.length ? gstEntries[gstEntries.length - 1].invoiceNumber : '',
-            to: gstEntries.length ? gstEntries[0].invoiceNumber : '',
-            totalIssued: gstEntries.length,
+            from: issuedSerials[0] || '',
+            to: issuedSerials[issuedSerials.length - 1] || '',
+            totalIssued: issuedSerials.length,
             cancelled: cancelledCount,
-            net: gstEntries.length,
+            net: issuedSerials.length,
+            /** Orders in the period with no tax invoice — cannot be filed yet. */
+            notIssued: unbilled.length,
+            series: [
+                {
+                    natureOfDocument: 'Tax invoice (outward supply)',
+                    from: issuedSerials[0] || '',
+                    to: issuedSerials[issuedSerials.length - 1] || '',
+                    totalIssued: issuedSerials.length,
+                    cancelled: cancelledCount,
+                    net: issuedSerials.length,
+                },
+                {
+                    natureOfDocument: 'Credit note',
+                    from: creditSerials[0] || '',
+                    to: creditSerials[creditSerials.length - 1] || '',
+                    totalIssued: creditSerials.length,
+                    cancelled: 0,
+                    net: creditSerials.length,
+                },
+                {
+                    natureOfDocument: 'Debit note',
+                    from: debitSerials[0] || '',
+                    to: debitSerials[debitSerials.length - 1] || '',
+                    totalIssued: debitSerials.length,
+                    cancelled: 0,
+                    net: debitSerials.length,
+                },
+            ],
         };
 
         // GSTR-3B Table 3.1(a) — outward taxable supplies (other than zero rated)
@@ -478,9 +675,27 @@ export async function GET(request: Request) {
             outwardTaxableSupplies: {
                 label: '3.1(a) Outward taxable supplies (other than zero rated, nil rated and exempted)',
                 taxableValue: summary.totalTaxableValue,
-                igst: 0,
+                igst: r2(gstEntries.reduce((sum, e) => sum + (e.igst || 0), 0)),
                 cgst: summary.totalCgst,
                 sgst: summary.totalSgst,
+                cess: 0,
+            },
+            // Debit notes add to the liability declared above.
+            debitNotes: {
+                label: 'Add: debit notes issued (GSTR-1 Table 9B)',
+                taxableValue: debitNoteTotals.taxableValue,
+                igst: debitNoteTotals.igst,
+                cgst: debitNoteTotals.cgst,
+                sgst: debitNoteTotals.sgst,
+                cess: 0,
+            },
+            // Credit notes reduce the liability declared above.
+            creditNotes: {
+                label: 'Less: credit notes issued (GSTR-1 Table 9B)',
+                taxableValue: -creditNoteTotals.taxableValue,
+                igst: -creditNoteTotals.igst,
+                cgst: -creditNoteTotals.cgst,
+                sgst: -creditNoteTotals.sgst,
                 cess: 0,
             },
             supplies95: {
@@ -491,7 +706,7 @@ export async function GET(request: Request) {
                 sgst: r2(summary.foodTaxable * GST_RATES.SGST / 100),
                 cess: 0,
             },
-            netTaxPayable: summary.totalGstCollected,
+            netTaxPayable: r2(summary.totalGstCollected + debitNoteTotals.totalTax - creditNoteTotals.totalTax),
         };
 
         const meta = {
@@ -719,6 +934,14 @@ export async function GET(request: Request) {
                 hsnSummary,
                 documentSummary,
                 gstr3b,
+                creditNotes: creditNoteRows,
+                creditNoteTotals,
+                debitNotes: debitNoteRows,
+                debitNoteTotals,
+                /** Delivered orders in the period with no tax invoice issued.
+                 *  Each one is a row the return cannot yet account for. */
+                unbilled: unbilled.slice(0, 500),
+                unbilledCount: unbilled.length,
                 monthlyData,
                 vendorData,
                 entries: gstEntries.slice(0, 500),
@@ -733,3 +956,8 @@ export async function GET(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

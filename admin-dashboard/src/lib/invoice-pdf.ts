@@ -127,9 +127,10 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     doc.setFontSize(6);
     doc.setTextColor(...accentColor);
     doc.setFont('helvetica', 'bold');
-    const suppliedByLabel = invoice.invoiceSubType === 'delivery' ? 'SUPPLIED BY (Delivery Partner)'
-        : invoice.invoiceSubType === 'platform' ? 'SUPPLIED BY (Platform)'
-        : 'SUPPLIED BY (Restaurant)';
+    // Under GST s.9(5) Delito is the supplier of record; its GSTIN heads the
+    // document. This panel identifies the restaurant that prepared the order,
+    // which is a reference, not a second supplier.
+    const suppliedByLabel = 'RESTAURANT (order prepared by)';
     doc.text(suppliedByLabel, vx + 3, y + 5);
     doc.setTextColor(...darkColor);
     doc.setFontSize(8);
@@ -144,8 +145,7 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
         const va = doc.splitTextToSize(`${invoice.vendor.address}${invoice.vendor.city ? ', ' + invoice.vendor.city : ''}`, halfW - 6);
         doc.text(va.slice(0, 1), vx + 3, vendorInfoY); vendorInfoY += 3.5;
     }
-    if (invoice.vendor.gstin) { doc.text(`GSTIN: ${invoice.vendor.gstin}`, vx + 3, vendorInfoY); vendorInfoY += 3.5; }
-    else { doc.text('GSTIN: Unregistered', vx + 3, vendorInfoY); vendorInfoY += 3.5; }
+    if (invoice.vendor.gstin) { doc.text(`Restaurant GSTIN: ${invoice.vendor.gstin}`, vx + 3, vendorInfoY); vendorInfoY += 3.5; }
     if (invoice.vendor.fssaiLicense) { doc.text(`FSSAI: ${invoice.vendor.fssaiLicense}`, vx + 3, vendorInfoY); }
 
     y += 33;
@@ -219,7 +219,20 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
         doc.text('Tax Summary', margin, y);
         y += 2;
 
-        const taxRows = invoice.taxSummary.map(row => [
+        // Inter-state supplies carry IGST in place of CGST + SGST, so the
+        // table switches heads rather than printing two empty columns.
+        const anyIgst = invoice.taxSummary.some(row => (row.igstAmount || 0) > 0);
+        const taxHead = anyIgst
+            ? ['Description', 'HSN', 'Taxable Amt', 'IGST%', 'IGST', 'Total Tax']
+            : ['Description', 'HSN', 'Taxable Amt', 'CGST%', 'CGST', 'SGST%', 'SGST', 'Total Tax'];
+        const taxRows = invoice.taxSummary.map(row => anyIgst ? [
+            row.description,
+            row.hsnCode || '',
+            fmtC(row.taxableAmount),
+            `${row.igstRate || 0}%`,
+            fmtC(row.igstAmount || 0),
+            fmtC(row.totalTax),
+        ] : [
             row.description,
             row.hsnCode || '',
             fmtC(row.taxableAmount),
@@ -232,7 +245,7 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
 
         autoTable(doc, {
             startY: y,
-            head: [['Description', 'HSN', 'Taxable Amt', 'CGST%', 'CGST', 'SGST%', 'SGST', 'Total Tax']],
+            head: [taxHead],
             body: taxRows,
             margin: { left: margin, right: margin },
             tableWidth: contentWidth,
@@ -285,7 +298,9 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     if (bill.tip > 0) lineCount++;
     if (bill.coinDiscount > 0) lineCount++;
     if (bill.promoDiscount > 0) lineCount++;
-    lineCount += 2; // CGST + SGST always shown
+    lineCount += 1; // Taxable Value subtotal
+    lineCount += (bill.igst || 0) > 0 ? 1 : 2; // IGST, or CGST + SGST
+    if ((bill.totalDiscount || 0) > 0) lineCount++; // savings memo
     if (bill.roundOff !== 0) lineCount++; // Round off line
     const boxH = 16 + lineCount * 4.5 + 10;
 
@@ -333,8 +348,16 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     if (bill.tip > 0) addLine('Tip', bill.tip);
     if (bill.coinDiscount > 0) addLine('Coin Disc.', bill.coinDiscount, true);
     if (bill.promoDiscount > 0) addLine('Promo Disc.', bill.promoDiscount, true);
-    addLine('CGST', bill.cgst);
-    addLine('SGST', bill.sgst);
+    // The discount lines above are shown at the taxable-value portion of each
+    // saving, so this subtotal is what the tax below is actually charged on
+    // and the column foots to the total.
+    addLine('Taxable Value', bill.taxableAmount, false, false);
+    if ((bill.igst || 0) > 0) {
+        addLine('IGST', bill.igst || 0);
+    } else {
+        addLine('CGST', bill.cgst);
+        addLine('SGST', bill.sgst);
+    }
     if (bill.roundOff !== 0) {
         // Show round off as a line: positive = add, negative = subtract
         if (bill.roundOff > 0) {
@@ -355,6 +378,20 @@ export function generateInvoicePDF(invoice: InvoiceData): Buffer {
     doc.setTextColor(...accentColor);
     doc.text('TOTAL', summaryX + 3, sy);
     doc.text(`Rs.${fmtC(bill.grandTotal)}`, summaryX + summaryWidth - 3, sy, { align: 'right' });
+
+    // What the customer recognises from checkout: the full saving including
+    // the tax on it. The lines above show each discount at its taxable-value
+    // portion, which is smaller, so this is stated separately rather than
+    // leaving the two to be confused.
+    if ((bill.totalDiscount || 0) > 0) {
+        sy += 4.5;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        doc.setTextColor(...greenColor);
+        doc.text('You saved (incl. GST)', summaryX + 3, sy);
+        doc.text(`Rs.${fmtC(bill.totalDiscount)}`, summaryX + summaryWidth - 3, sy, { align: 'right' });
+        doc.setTextColor(...darkColor);
+    }
 
     // ─── AMOUNT IN WORDS + PAYMENT (left side) ───
     const wordsY = y;

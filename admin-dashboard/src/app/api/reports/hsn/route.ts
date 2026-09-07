@@ -6,6 +6,8 @@ import { reportResponse, platformMeta, formatDay } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { withAdmin } from '@/lib/api-guard';
+import { istCurrentMonthBounds, istDayBoundsFromString } from '@/lib/fiscal';
 
 /**
  * HSN Summary API — for GSTR-1 filing
@@ -40,20 +42,17 @@ export interface HSNRow {
     cessAmount: number;
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const format = searchParams.get('format') || 'json';
 
-        const now = new Date();
-        const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-        const defaultTo = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
+        // The tax period is an IST calendar month, not the host's.
+        const monthBounds = istCurrentMonthBounds();
         const fromStr = searchParams.get('from');
         const toStr = searchParams.get('to');
-        const fromDate = fromStr ? new Date(fromStr) : defaultFrom;
-        const toDate = toStr ? new Date(toStr) : defaultTo;
-        toDate.setHours(23, 59, 59, 999);
+        const fromDate = (fromStr && istDayBoundsFromString(fromStr)?.start) || monthBounds.start;
+        const toDate = (toStr && istDayBoundsFromString(toStr)?.end) || monthBounds.end;
 
         const allOrders = await cachedCollection(collections.orders, 30000);
         const invoiceNumbers = await getInvoiceNumberMap();
@@ -232,3 +231,8 @@ function generateHSNPDF(rows: HSNRow[], totals: any, from: Date, to: Date): Buff
 
     return Buffer.from(doc.output('arraybuffer'));
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

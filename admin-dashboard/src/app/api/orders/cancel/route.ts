@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { db, collections, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedResponse } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
+import { creditedTotalFor } from '@/lib/credit-note';
 
 /**
  * POST /api/orders/cancel
@@ -11,7 +13,7 @@ import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedRespons
  * - Auto-initiates refund if payment was online & paid
  * - Creates a cancellation record for audit trail
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         // Auth check
         const authResult = await verifyApiAuth(request);
@@ -52,6 +54,24 @@ export async function POST(request: Request) {
             return NextResponse.json(
                 { success: false, error: 'Cannot cancel a delivered/completed order. Process a refund instead.' },
                 { status: 400 }
+            );
+        }
+
+        // If a tax invoice has been issued, cancelling it is not a status
+        // change — the output tax has been declared and only a credit note
+        // reverses it (s.34). Flipping the status here would leave GST paid on
+        // a supply that no longer exists.
+        const invoicePosition = await creditedTotalFor(orderId);
+        if (invoicePosition && invoicePosition.remaining > 0.01) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: `A tax invoice has been issued for this order (₹${invoicePosition.remaining.toFixed(2)} uncredited). ` +
+                        'Raise a credit note against it instead of cancelling.',
+                    requiresCreditNote: true,
+                    uncreditedAmount: invoicePosition.remaining,
+                },
+                { status: 409 }
             );
         }
 
@@ -206,5 +226,7 @@ export async function POST(request: Request) {
     }
 }
 
-
-
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const POST = withAdmin(handlePOST);

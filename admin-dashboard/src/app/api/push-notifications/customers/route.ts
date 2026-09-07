@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
 // GET — Fetch customers for notification targeting
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
 
     try {
         const { searchParams } = new URL(req.url);
@@ -57,3 +58,8 @@ export async function GET(req: NextRequest) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

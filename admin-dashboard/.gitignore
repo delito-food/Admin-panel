@@ -63,3 +63,12 @@ ehthumbs.db
 
 # ---- Misc ----
 *.local
+
+# ---- Reconciliation output ----
+# Contains vendor turnover, GSTINs and tax figures. It goes to the CA
+# directly, never into a source repository.
+/ca-reconciliation-pack/
+
+# ---- Pre-change working copies ----
+# Kept locally as a rollback aid; the published history is the real one.
+*.bak

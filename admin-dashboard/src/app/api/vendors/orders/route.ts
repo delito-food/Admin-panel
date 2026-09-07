@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/vendors/orders?vendorId=xxx&limit=500&status=Delivered
@@ -26,7 +27,7 @@ const tsToMillis = (v: any): number => {
     return iso ? new Date(iso).getTime() : 0;
 };
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const vendorId = searchParams.get('vendorId');
@@ -171,3 +172,8 @@ export async function GET(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

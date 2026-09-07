@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/menu-management
  * Fetch all menu items with vendor info, grouped by verification status
  */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const statusFilter = searchParams.get('status'); // pending, approved, rejected, all
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
  * PATCH /api/menu-management
  * Admin approves/rejects a menu item, optionally changing price
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { itemId, action, adminApprovedPrice, adminNotes, rejectionReason, tags } = body;
@@ -208,7 +209,7 @@ export async function PATCH(request: Request) {
  * POST /api/menu-management
  * Bulk actions on menu items
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json();
         const { action, itemIds, adminNotes } = body;
@@ -261,3 +262,9 @@ export async function POST(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PATCH = withAdmin(handlePATCH);

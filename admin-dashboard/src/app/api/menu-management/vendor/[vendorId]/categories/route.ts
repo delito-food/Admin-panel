@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db, collections, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function GET(request: Request, context: { params: Promise<{ vendorId: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ vendorId: string }> }) {
     try {
         const vendorId = (await context.params).vendorId;
         const snapshot = await db.collection(collections.categories).where('vendorId', '==', vendorId).get();
@@ -21,7 +22,7 @@ export async function GET(request: Request, context: { params: Promise<{ vendorI
     }
 }
 
-export async function POST(request: Request, context: { params: Promise<{ vendorId: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ vendorId: string }> }) {
     try {
         const vendorId = (await context.params).vendorId;
         const body = await request.json();
@@ -53,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ vendor
     }
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ vendorId: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ vendorId: string }> }) {
     try {
         const vendorId = (await context.params).vendorId;
         const body = await request.json();
@@ -83,7 +84,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ vendo
     }
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ vendorId: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ vendorId: string }> }) {
     try {
         const vendorId = (await context.params).vendorId;
         const { searchParams } = new URL(request.url);
@@ -112,3 +113,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ vend
         return NextResponse.json({ success: false, error: 'Failed to delete category' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PATCH = withAdmin(handlePATCH);
+export const DELETE = withAdmin(handleDELETE);

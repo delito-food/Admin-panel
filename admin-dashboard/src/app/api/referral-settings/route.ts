@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 const REFERRAL_CONFIG_DOC = 'referralConfig';
 const SETTINGS_COLLECTION = 'platformSettings';
@@ -9,7 +10,7 @@ const SETTINGS_COLLECTION = 'platformSettings';
  * GET /api/referral-settings
  * Fetch current referral configuration
  */
-export async function GET() {
+async function handleGET() {
     try {
         const configRef = db.collection(SETTINGS_COLLECTION).doc(REFERRAL_CONFIG_DOC);
         const configDoc = await configRef.get();
@@ -71,7 +72,7 @@ export async function GET() {
  * PATCH /api/referral-settings
  * Admin updates referral configuration
  */
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { settings, adminId } = body;
@@ -156,6 +157,8 @@ export async function PATCH(request: Request) {
     }
 }
 
-
-
-
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

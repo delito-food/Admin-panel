@@ -1,8 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse, NextRequest } from 'next/server';
-import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
+import { db, collections, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
+import { computeCommission, r2 } from '@/lib/pricing-engine';
+import { allLedgerBalances, divergence, type LedgerBalance } from '@/lib/ledger';
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
     try {
         // Parse optional date range query params
         const { searchParams } = new URL(request.url);
@@ -23,7 +26,7 @@ export async function GET(request: NextRequest) {
         // Filter orders by date range if provided
         if (startDate || endDate) {
             orderDocs = orderDocs.filter(order => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 const rawCreatedAt = order.createdAt as any;
                 const orderDate = rawCreatedAt?.toDate?.() || (rawCreatedAt ? new Date(rawCreatedAt) : null);
                 if (!orderDate) return false;
@@ -35,13 +38,22 @@ export async function GET(request: NextRequest) {
             });
         }
 
+        // The ledger is the authority on what each vendor is owed. It is read
+        // once here; the order-derived figures below are kept only as a
+        // cross-check and as the fallback for vendors not yet backfilled.
+        let ledgerBalances: Record<string, LedgerBalance> = {};
+        try {
+            ledgerBalances = await allLedgerBalances('vendor');
+        } catch (err) {
+            console.warn('[payouts] ledger unavailable, falling back to order-derived figures:', err);
+        }
+
         // Get payout history (small collection, fetch fresh)
         const payoutsSnapshot = await db.collection('vendorPayouts').orderBy('createdAt', 'desc').limit(200).get()
             .catch(() => ({ docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }));
 
         // GST rate on commission (platform earnings)
-        const GST_RATE = 0.18; // 18% GST
-        const COMMISSION_RATE = 0.15; // 15% commission on item total
+        // Commission and its GST now come from lib/pricing-engine.
 
         // Calculate vendor payouts
         const vendorPayouts: Record<string, {
@@ -88,13 +100,12 @@ export async function GET(request: NextRequest) {
             const itemTotal = (order.itemTotal as number) || (order.subtotal as number) ||
                 Math.max(0, ((order.total as number) || 0) - deliveryFeeAmt);
 
-            // Commission: use stored values when available (respects custom vendor rates)
-            const commission = (order.vendorPlatformCut as number) > 0
-                ? (order.vendorPlatformCut as number)
-                : Math.round(itemTotal * COMMISSION_RATE * 10) / 10;
-            const gstOnCommission = (order.vendorGstOnPlatformCut as number) > 0
-                ? (order.vendorGstOnPlatformCut as number)
-                : Math.round(commission * GST_RATE * 10) / 10;
+            // Commission comes from the shared pricing engine — the same call the
+            // commission invoice and the GST report make — so the three can no
+            // longer report three different figures for the same order.
+            const commissionResult = computeCommission(order, itemTotal);
+            const commission = commissionResult.amount;
+            const gstOnCommission = commissionResult.gst;
 
             // Small order fee (₹10 if order < ₹99) - goes to platform
             const smallOrderFee = (order.smallOrderSupportFee as number) || 0;
@@ -124,7 +135,7 @@ export async function GET(request: NextRequest) {
             vendorPayouts[vendorId].netPayable += vendorEarning;
             vendorPayouts[vendorId].orderCount += 1;
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const rawCreatedAt = order.createdAt as any;
             const orderDate = rawCreatedAt?.toDate?.() || (rawCreatedAt ? new Date(rawCreatedAt) : null);
             if (orderDate) {
@@ -215,19 +226,44 @@ export async function GET(request: NextRequest) {
                 orderCount: 0, lastOrderDate: null,
             };
 
-            // paidAmount: take the HIGHER of (sum of completed payout records) vs (vendorDoc.paidAmount).
-            const payoutsCollectionPaid = payoutsByVendor[data.id] || 0;
-            const vendorDocPaid = (data.paidAmount as number) || 0;
-            payout.paidAmount = Math.round(Math.max(payoutsCollectionPaid, vendorDocPaid) * 100) / 100;
+            // ── Reconciliation ──
+            //
+            // One source of truth, in a defined order of preference:
+            //   1. the append-only ledger, when this vendor has rows;
+            //   2. otherwise the order-derived figures computed above.
+            //
+            // The denormalised counters on the vendor document are never a value
+            // source any more. They are compared, and any gap is reported as a
+            // discrepancy for someone to investigate. The rule this replaces was
+            // Math.max() of two records that disagreed — which silently underpaid
+            // the vendor when the cache was stale-high and overpaid when it was
+            // stale-low, with no way to tell which had happened.
+            const ledger = ledgerBalances[data.id];
+            const payoutsCollectionPaid = r2(payoutsByVendor[data.id] || 0);
+            const vendorDocPaid = r2((data.paidAmount as number) || 0);
+            const vendorDocNet = r2(((data.totalEarnings as number) || 0) - ((data.totalCommission as number) || 0));
 
-            // netPayable: order-based calc may be lower than vendor app's figure (different itemTotal
-            // fallback logic). Trust the higher value so pending is never understated.
-            const vendorDocNet = ((data.totalEarnings as number) || 0) - ((data.totalCommission as number) || 0);
-            if (vendorDocNet > payout.netPayable && vendorDocNet > 0) {
-                payout.netPayable = Math.round(vendorDocNet * 100) / 100;
+            const derivedNet = r2(payout.netPayable);
+            const source: 'ledger' | 'orders' = ledger && ledger.entryCount > 0 ? 'ledger' : 'orders';
+
+            if (source === 'ledger') {
+                // balance = earnings − commission − credit notes − payouts
+                payout.paidAmount = r2(ledger.paidOut);
+                payout.netPayable = r2(ledger.balance + ledger.paidOut);
+            } else {
+                payout.paidAmount = payoutsCollectionPaid;
             }
+            payout.pendingAmount = r2(Math.max(0, payout.netPayable - payout.paidAmount));
 
-            payout.pendingAmount = Math.round(Math.max(0, payout.netPayable - payout.paidAmount) * 100) / 100;
+            const paidVsPayoutsCollection = divergence(payout.paidAmount, payoutsCollectionPaid);
+            const paidVsVendorDoc = divergence(payout.paidAmount, vendorDocPaid);
+            const netVsVendorDoc = divergence(payout.netPayable, vendorDocNet);
+            const netVsDerived = divergence(payout.netPayable, derivedNet);
+            const discrepancies: string[] = [];
+            if (!paidVsPayoutsCollection.agrees) discrepancies.push(`paid differs from the payouts collection by ₹${paidVsPayoutsCollection.gap.toFixed(2)}`);
+            if (!paidVsVendorDoc.agrees) discrepancies.push(`paid differs from the vendor record by ₹${paidVsVendorDoc.gap.toFixed(2)}`);
+            if (vendorDocNet > 0 && !netVsVendorDoc.agrees) discrepancies.push(`payable differs from the vendor record by ₹${netVsVendorDoc.gap.toFixed(2)}`);
+            if (source === 'ledger' && !netVsDerived.agrees) discrepancies.push(`ledger payable differs from the order-derived figure by ₹${netVsDerived.gap.toFixed(2)}`);
 
             return {
                 vendorId: data.id,
@@ -239,6 +275,11 @@ export async function GET(request: NextRequest) {
                 city: (data.city || '') as string,
                 isVerified: (data.isVerified || false) as boolean,
                 commissionRate: (data.commissionRate || 15) as number,
+                /** Where paidAmount and netPayable came from. */
+                balanceSource: source,
+                /** Empty when every record agrees. Each string names a gap to investigate. */
+                discrepancies,
+                ledgerEntryCount: ledger?.entryCount || 0,
                 bankDetails: data.bankDetails || (data.bankAccountNumber ? {
                     accountNumber: data.bankAccountNumber,
                     ifsc: data.bankIfscCode || data.ifscCode || '',
@@ -275,3 +316,7 @@ export async function GET(request: NextRequest) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

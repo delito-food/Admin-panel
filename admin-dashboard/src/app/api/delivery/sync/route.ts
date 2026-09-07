@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // Constants for delivery earnings calculation
 const BASE_DELIVERY_FEE = 10; // ₹10 base
@@ -10,7 +11,7 @@ const PER_KM_RATE = 6.5; // ₹6.5 per km
  * Sync/recalculate earnings for all delivery partners
  * This is useful when data is out of sync
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json().catch(() => ({}));
         const { deliveryPersonId } = body;
@@ -142,3 +143,7 @@ export async function POST(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const POST = withAdmin(handlePOST);

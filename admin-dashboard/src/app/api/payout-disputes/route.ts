@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
 
 /**
  * GET /api/payout-disputes
  * Admin: list all open/resolved disputes
  */
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
 
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
  * This is called from the app via Firebase SDK directly (not this API)
  * But admin can also create one manually
  */
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
 
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
  * PUT /api/payout-disputes
  * Admin resolves a dispute
  */
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
 
@@ -137,3 +138,9 @@ export async function PUT(request: Request) {
     }
 }
 
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PUT = withAdmin(handlePUT);

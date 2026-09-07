@@ -3,8 +3,9 @@ import { db } from '@/lib/firebase-admin';
 import { collections } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { invalidateCache } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
-export async function PATCH(
+async function handlePATCH(
     request: Request,
     { params }: { params: Promise<{ vendorId: string }> }
 ) {
@@ -75,3 +76,8 @@ export async function PATCH(
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const PATCH = withAdmin(handlePATCH);

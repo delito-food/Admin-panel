@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -5,8 +6,10 @@ import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedRespons
 import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
 import { reportResponse, platformMeta } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
+import { withAdmin } from '@/lib/api-guard';
+import { computeOrderEconomics } from '@/lib/pricing-engine';
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     try {
         // Auth check
         const authResult = await verifyApiAuth(request);
@@ -218,31 +221,22 @@ export async function GET(request: Request) {
             const pickedUpAt = tsToIso(data.pickedUpAt) || tsToIso(taskInfo?.pickedUpAt) || null;
 
             // ── Discounts ──
-            // `discount` on the order document only ever carries the delivery
-            // discount. The real customer-facing discounts are spread across the
-            // fields below, so expose each one plus a combined total.
-            const itemLineDiscount = (data.items || []).reduce((sum: number, it: any) => {
-                const qty = it.quantity || 1;
-                const price = it.price || 0;
-                const original = it.originalPrice ?? price;
-                return sum + Math.max(0, (original - price) * qty);
-            }, 0);
+            //
+            // Taken from the shared pricing engine so this list, the invoice and
+            // the GST report all describe the same order the same way. The old
+            // code re-derived them here with Math.max() over two disagreeing
+            // sources, which is how the same order could show one discount on
+            // this screen and another on its bill.
+            const economics = computeOrderEconomics(data, doc.id);
+            const discountOf = (key: string) => economics.discounts
+                .filter(d => d.key === key)
+                .reduce((sum, d) => sum + d.amount, 0);
+
             const originalItemTotal = data.originalItemTotal || 0;
-            const itemTotalValue = data.itemTotal || data.subtotal || 0;
-            const itemDiscount = Math.max(
-                itemLineDiscount,
-                originalItemTotal > itemTotalValue ? originalItemTotal - itemTotalValue : 0
-            );
-            const hungerGameDeliveryDiscount = data.hungerGameLevel2DeliveryDiscount || 0;
-            const hungerGameComponents = (data.hungerGameLevel1Discount || 0)
-                + (data.hungerGameCouponDiscount || 0)
-                + (data.hungerGameLevel5Savings || 0);
-            const hungerGameDiscount = hungerGameComponents > 0
-                ? hungerGameComponents
-                : Math.max(0, (data.hungerGameDiscount || 0) - hungerGameDeliveryDiscount);
-            const deliveryDiscount = (data.deliveryDiscount ?? data.discount ?? 0) + hungerGameDeliveryDiscount;
-            const totalDiscount = itemDiscount + hungerGameDiscount + deliveryDiscount
-                + (data.coinDiscount || 0) + (data.promoDiscount || 0);
+            const itemDiscount = discountOf('item');
+            const hungerGameDiscount = discountOf('hungerGameFood');
+            const deliveryDiscount = discountOf('hungerGameDelivery');
+            const totalDiscount = economics.totalDiscount;
 
             return {
                 orderId: doc.id,
@@ -402,7 +396,7 @@ export async function GET(request: Request) {
 
 
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
     try {
         const body = await request.json();
         const { orderId, updates } = body;
@@ -428,3 +422,9 @@ export async function PATCH(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const PATCH = withAdmin(handlePATCH);

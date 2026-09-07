@@ -126,6 +126,8 @@ export interface CommissionInvoiceData {
         weekLabel: string;
         orders: number;
         grossSales: number;
+        /** The amount commission was charged on — the pre-discount item total. */
+        commissionBase?: number;
         commission: number;
         gstOnCommission: number;
         totalDeduction: number;
@@ -134,6 +136,7 @@ export interface CommissionInvoiceData {
     monthlyTotals: {
         orders: number;
         grossSales: number;
+        commissionBase?: number;
         commission: number;
         gstOnCommission: number;
         totalDeduction: number;
@@ -151,15 +154,12 @@ export interface CommissionInvoiceData {
     };
 }
 
-/**
- * Generate invoice number from a sequential counter
- * Format: INV-2026-000001
- */
-export function generateInvoiceNumber(counter: number): string {
-    const year = new Date().getFullYear();
-    const paddedCounter = String(counter).padStart(6, '0');
-    return `${INVOICE_PREFIX}-${year}-${paddedCounter}`;
-}
+// generateInvoiceNumber() lived here. It stamped the CALENDAR year at issue
+// time onto a counter that never reset, so INV-2026-000998 could be followed
+// by INV-2027-000999 — a label change with no series break, in a country
+// whose financial year runs April to March. Serials now come from
+// lib/invoice-series.ts, which is scoped to the financial year and resets on
+// 1 April. INVOICE_PREFIX is kept only to recognise the closed legacy series.
 
 /**
  * Normalise an invoice number for display/export.
@@ -178,7 +178,12 @@ export function formatInvoiceNumber(invoiceNumber?: string | null): string {
  */
 export interface InvoiceData {
     // Header
+    /** Empty until the invoice is actually issued — previews never allocate one. */
     invoiceNumber: string;
+    /** False while this is a preview and no serial has been consumed. */
+    invoiceIssued?: boolean;
+    /** ISO timestamp of when the serial was first allocated. */
+    invoiceIssuedAt?: string | null;
     invoiceDate: string;
     /** Every Delito invoice is issued as a Tax Invoice. */
     invoiceType: 'Tax Invoice';
@@ -229,6 +234,8 @@ export interface InvoiceData {
         taxableAmount: number;
         cgst: number;
         sgst: number;
+        /** Present on inter-state supplies; cgst and sgst are then zero. */
+        igst?: number;
         totalTax: number;
         roundOff: number;
         /** Sum of every discount line shown on the invoice */
@@ -269,6 +276,8 @@ export interface TaxSummaryRow {
     cgstAmount: number;
     sgstRate: number;
     sgstAmount: number;
+    igstRate?: number;
+    igstAmount?: number;
     totalTax: number;
 }
 

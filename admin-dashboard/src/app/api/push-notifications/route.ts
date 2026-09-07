@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, collections, sendBulkPushNotification } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // POST — Send a push notification campaign
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
 
     try {
         const { title, body, imageUrl, target, cityFilter, customerIds } = await req.json();
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET — Fetch push notification campaign history
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
 
     try {
         const snapshot = await db.collection(collections.pushNotifications)
@@ -161,3 +162,9 @@ export async function GET(req: NextRequest) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);

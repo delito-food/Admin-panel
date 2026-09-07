@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
+import { istDaysAgoStart, istCurrentMonthBounds } from '@/lib/fiscal';
 
 // Types for reports
 interface VendorRevenue {
@@ -122,15 +124,12 @@ interface ReportsData {
 }
 
 function getDateRanges() {
+    // All period boundaries in IST. Built with setHours() on a UTC host, the
+    // day started at 05:30 IST, so the morning trade was reported against
+    // the previous day.
     const now = new Date();
-
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(now.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
-
-    const monthStart = new Date(now);
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = istDaysAgoStart(30, now);
+    const monthStart = istCurrentMonthBounds(now).start;
 
     return { thirtyDaysAgo, monthStart, now };
 }
@@ -160,7 +159,7 @@ function extractPincode(address: string): string {
     return pincodeMatch ? pincodeMatch[0] : 'Unknown';
 }
 
-export async function GET() {
+async function handleGET() {
     try {
         const { thirtyDaysAgo, now } = getDateRanges();
 
@@ -547,3 +546,8 @@ export async function GET() {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

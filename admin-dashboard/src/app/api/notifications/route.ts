@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
+import { withAdmin } from '@/lib/api-guard';
 
 // Returns real-time notification items by querying Firestore for:
 //  • New / unverified vendors
 //  • Unverified delivery partners
 //  • Recent new orders (last 2 hours)
 //  • Any docs in the native `notifications` collection
-export async function GET() {
+async function handleGET() {
     try {
         const items: {
             id: string;
@@ -143,3 +144,8 @@ export async function GET() {
         return NextResponse.json({ success: false, error: 'Failed to fetch notifications' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);

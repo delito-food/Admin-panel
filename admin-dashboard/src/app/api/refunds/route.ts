@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth } from '@/lib/api-auth';
+import { withAdmin } from '@/lib/api-guard';
+import { applyRefundEffects } from '@/lib/refund-effects';
 
 // Razorpay API configuration
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
@@ -13,10 +15,13 @@ interface RefundRequest {
     amount: number;
     reason: string;
     refundType: 'full' | 'partial';
+    /** Who absorbs the refund. Omit and it is recorded as unallocated —
+     *  the vendor's balance is never debited on a guess. */
+    borneBy?: 'platform' | 'vendor';
 }
 
 // Get refund history
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) {
         return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
@@ -77,7 +82,7 @@ export async function GET(request: Request) {
 }
 
 // Process refund via Razorpay
-export async function POST(request: Request) {
+async function handlePOST(request: Request, _ctx: unknown, auth?: { email?: string; uid?: string }) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) {
         return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
@@ -94,19 +99,20 @@ export async function POST(request: Request) {
             );
         }
 
-        // Idempotency: check if refund already exists for this order
-        const existingRefund = await db.collection('refunds')
+        // How much has already gone back on this order.
+        //
+        // The previous guard rejected ANY order that had one successful
+        // refund, so a second partial refund — a further complaint on the
+        // same order — was impossible. What actually needs preventing is
+        // refunding more than was charged.
+        const priorRefunds = await db.collection('refunds')
             .where('orderId', '==', orderId)
-            .where('status', '==', 'SUCCESS')
-            .limit(1)
             .get();
-
-        if (!existingRefund.empty) {
-            return NextResponse.json(
-                { success: false, error: 'Refund already processed for this order' },
-                { status: 409 }
-            );
-        }
+        const alreadyRefunded = Math.round(
+            priorRefunds.docs
+                .filter(d => String(d.data().status || '').toUpperCase() === 'SUCCESS')
+                .reduce((sum, d) => sum + (Number(d.data().amount) || 0), 0) * 100
+        ) / 100;
 
         // Get order details
         const orderRef = db.collection(collections.orders).doc(orderId);
@@ -122,6 +128,20 @@ export async function POST(request: Request) {
         const orderData = orderDoc.data() || {};
         const razorpayPaymentId = orderData.razorpayPaymentId;
         const orderTotal = orderData.total || 0;
+
+        const refundable = Math.round((orderTotal - alreadyRefunded) * 100) / 100;
+        if (refundable <= 0) {
+            return NextResponse.json(
+                { success: false, error: `Order ${orderId} has already been fully refunded (₹${alreadyRefunded.toFixed(2)} of ₹${orderTotal.toFixed(2)}).` },
+                { status: 409 }
+            );
+        }
+        if (amount > refundable + 0.01) {
+            return NextResponse.json(
+                { success: false, error: `Cannot refund ₹${amount.toFixed(2)} — only ₹${refundable.toFixed(2)} of this order remains unrefunded.` },
+                { status: 409 }
+            );
+        }
         const paymentMode = orderData.paymentMode || '';
 
         // Check if online payment
@@ -157,6 +177,25 @@ export async function POST(request: Request) {
                 updatedAt: Timestamp.now(),
             });
 
+            // Reverse the tax. A refund after invoicing leaves output GST
+            // declared on a supply that has been undone unless a credit note is
+            // raised against the original invoice (s.34).
+            const codEffects = await applyRefundEffects({
+                orderId,
+                refundId: refundRef.id,
+                amount,
+                isFullRefund,
+                reason,
+                borneBy: body.borneBy,
+                vendorId: orderData.vendorId as string | undefined,
+                issuedBy: auth?.email || auth?.uid || 'admin',
+            });
+            await refundRef.update({
+                creditNoteNumber: codEffects.creditNoteNumber || '',
+                creditNoteWarning: codEffects.creditNoteWarning || '',
+                costUnallocated: codEffects.costUnallocated,
+            });
+
             // Update complaint if exists
             if (complaintId) {
                 await db.collection('complaints').doc(complaintId).update({
@@ -173,6 +212,9 @@ export async function POST(request: Request) {
                 success: true,
                 message: `COD order marked as ${isFullRefund ? 'fully' : 'partially'} refunded`,
                 refundId: refundRef.id,
+                creditNoteNumber: codEffects.creditNoteNumber,
+                warning: codEffects.creditNoteWarning,
+                costUnallocated: codEffects.costUnallocated,
             });
         }
 
@@ -338,6 +380,24 @@ export async function POST(request: Request) {
             updatedAt: Timestamp.now(),
         });
 
+        // Reverse the tax on the original invoice (s.34). Idempotent on
+        // refundRef.id, so a retried request cannot raise a second note.
+        const rzpEffects = await applyRefundEffects({
+            orderId,
+            refundId: refundRef.id,
+            amount,
+            isFullRefund: isFullRefundRzp,
+            reason,
+            borneBy: body.borneBy,
+            vendorId: orderData.vendorId as string | undefined,
+            issuedBy: auth?.email || auth?.uid || 'admin',
+        });
+        await refundRef.update({
+            creditNoteNumber: rzpEffects.creditNoteNumber || '',
+            creditNoteWarning: rzpEffects.creditNoteWarning || '',
+            costUnallocated: rzpEffects.costUnallocated,
+        });
+
         // Update complaint if exists
         if (complaintId) {
             await db.collection('complaints').doc(complaintId).update({
@@ -356,6 +416,9 @@ export async function POST(request: Request) {
             refundId: refundRef.id,
             razorpayRefundId: razorpayResult.id,
             mode: 'razorpay',
+            creditNoteNumber: rzpEffects.creditNoteNumber,
+            warning: rzpEffects.creditNoteWarning,
+            costUnallocated: rzpEffects.costUnallocated,
         });
     } catch (error) {
         console.error('Refund processing error:', error);
@@ -373,7 +436,7 @@ export async function POST(request: Request) {
  * Body: { action: 'retry', refundId: string }
  *   or  { action: 'health_check' }
  */
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
     const authResult = await verifyApiAuth(request);
     if (!authResult.authenticated) {
         return NextResponse.json({ success: false, error: authResult.error }, { status: 401 });
@@ -588,3 +651,10 @@ export async function PUT(request: Request) {
         return NextResponse.json({ success: false, error: 'Failed to process request' }, { status: 500 });
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const PUT = withAdmin(handlePUT);

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import { withAdmin } from '@/lib/api-guard';
 
 // Get available delivery partners and unassigned orders
-export async function GET() {
+async function handleGET() {
     try {
         // Get orders that need assignment (pending or can be reassigned)
         const ordersSnapshot = await db.collection(collections.orders)
@@ -99,7 +100,7 @@ export async function GET() {
 }
 
 // Assign order to delivery partner
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
     try {
         const body = await request.json();
         const { orderId, deliveryPersonId, deliveryPersonName, deliveryPersonPhone, reason } = body;
@@ -230,7 +231,7 @@ export async function POST(request: Request) {
 }
 
 // Unassign order from delivery partner
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const orderId = searchParams.get('orderId');
@@ -309,3 +310,10 @@ export async function DELETE(request: Request) {
         );
     }
 }
+
+// ── Auth ──
+// Verified Firebase ID token + admin authorisation, enforced in the Node
+// runtime. middleware.ts only checks that a header is present.
+export const GET = withAdmin(handleGET);
+export const POST = withAdmin(handlePOST);
+export const DELETE = withAdmin(handleDELETE);
