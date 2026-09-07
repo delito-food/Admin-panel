@@ -85,8 +85,8 @@ completed by reconciliation previously never reached any balance at all.
 
 ```bash
 cd admin-dashboard
-node scripts/backfill-ledger.js --dry-run   # report + per-vendor gap table
-node scripts/backfill-ledger.js             # post the rows
+node scripts/backfill-ledger.js   # report + per-vendor gap table
+node scripts/backfill-ledger.js --confirm   # post the rows
 ```
 
 The dry run prints, per vendor and per delivery partner, the ledger balance
@@ -150,7 +150,7 @@ binary and the sandbox has no network.
 1. `firebase deploy --only firestore:rules,firestore:indexes` — **first**; the
    ledger query needs its index.
 2. Push the dashboard.
-3. `node scripts/backfill-ledger.js --dry-run`, read the gap table, investigate
+3. `node scripts/backfill-ledger.js`, read the gap table, investigate
    anything material, then run it for real.
 4. Check the payouts screens show `balanceSource: "ledger"` and an empty
    `discrepancies` for the vendors you expect.

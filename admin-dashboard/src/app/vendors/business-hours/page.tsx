@@ -72,10 +72,36 @@ function slotsOf(day: DayHours | undefined): TimeSlot[] {
     return [];
 }
 
+/**
+ * Lowercases day keys before lookup.
+ *
+ * Vendor app v2.5 writes businessHours as { Monday: ..., Tuesday: ... }; this
+ * page reads lowercase. Without this, opening a real vendor in the editor showed
+ * all seven days closed with no slots — and saving that would have written the
+ * empty week back over their actual hours.
+ *
+ * Mirrors normaliseHourKeys() in @/lib/scheduleEngine. Kept local because this
+ * component works on the editor's own draft state, not on engine input.
+ */
+function lowercaseDayKeys(hours: BusinessHoursMap | undefined): BusinessHoursMap {
+    const out: BusinessHoursMap = {};
+    if (!hours || typeof hours !== 'object') return out;
+
+    for (const [key, value] of Object.entries(hours)) {
+        const day = String(key).trim().toLowerCase();
+        if (!DAYS.includes(day)) continue;
+        // A lowercase entry already placed wins over a capitalised duplicate.
+        if (Object.prototype.hasOwnProperty.call(hours, day) && key !== day) continue;
+        out[day] = value;
+    }
+    return out;
+}
+
 function normalise(hours: BusinessHoursMap): BusinessHoursMap {
+    const src = lowercaseDayKeys(hours);
     const out: BusinessHoursMap = {};
     for (const d of DAYS) {
-        const cfg = hours?.[d];
+        const cfg = src[d];
         const slots = slotsOf(cfg);
         out[d] = { isOpen: cfg?.isOpen === true && slots.length > 0, slots };
     }
@@ -343,7 +369,12 @@ function ScheduleEditor({ vendor, onClose, onSaved }: {
     const [copied, setCopied] = useState(false);
 
     const errors = useMemo(() => validate(hours), [hours]);
-    const blocked = vendor.blockers.isSuspended || vendor.blockers.adminForceOffline || vendor.blockers.verificationStatus !== 'verified';
+    // 'approved' is what the vendor approval flow actually writes; 'verified' was
+    // only ever a string this scheduler invented. Accept both.
+    const VERIFIED = ['approved', 'verified'];
+    const verificationOk = !vendor.blockers.verificationStatus ||
+        VERIFIED.includes(vendor.blockers.verificationStatus.trim().toLowerCase());
+    const blocked = vendor.blockers.isSuspended || vendor.blockers.adminForceOffline || !verificationOk;
 
     const setDay = useCallback((day: string, patch: Partial<DayHours>) => {
         setHours((h) => ({ ...h, [day]: { ...h[day], ...patch } }));
@@ -436,7 +467,7 @@ function ScheduleEditor({ vendor, onClose, onSaved }: {
                                 This shop cannot auto-open regardless of its hours:
                                 {vendor.blockers.isSuspended && ' suspended.'}
                                 {vendor.blockers.adminForceOffline && ' admin force-offline.'}
-                                {vendor.blockers.verificationStatus !== 'verified' && ` verification is "${vendor.blockers.verificationStatus}".`}
+                                {!verificationOk && ` verification is "${vendor.blockers.verificationStatus}".`}
                                 {' '}Clear that first — schedule changes here will save but stay inactive.
                             </div>
                         </div>

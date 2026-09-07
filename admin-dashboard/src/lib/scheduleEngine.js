@@ -24,6 +24,50 @@ const REASON = {
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 
+/**
+ * Schedule inputs. A write that touches none of these cannot change the
+ * evaluation, which is what makes the onWrite trigger safe against its own
+ * output. `isOnline` is deliberately ABSENT — see decideVendorWrite().
+ */
+const WATCHED_FIELDS = [
+    'businessHours', 'timezone', 'holidays', 'autoScheduleEnabled',
+    'manualOverride', 'isSuspended', 'adminForceOffline', 'verificationStatus'
+];
+
+/**
+ * Verification values that mean "this shop is allowed to trade".
+ *
+ * The scheduler originally tested `verificationStatus !== 'verified'` — but
+ * nothing on this platform has ever written that string. The admin approval flow
+ * writes 'approved' (admin-dashboard api/verification/vendors/route.ts) and the
+ * vendor app gates its own UI on `verificationStatus == "approved"`
+ * (HomeScreen.kt:572). 'verified' appeared only inside this engine.
+ *
+ * The consequence was severe and silent: EVERY vendor, including fully approved
+ * ones actively taking orders, evaluated as UNVERIFIED. Enabling auto-schedule on
+ * a healthy shop would have set it offline with nextTransitionAt: null — which
+ * drops it out of the tick query, so it would never have come back on its own.
+ *
+ * Both spellings are accepted, so this cannot break again from either direction.
+ */
+const VERIFIED_STATUSES = ['approved', 'verified'];
+
+/**
+ * True if this vendor's verification does not block trading.
+ * An absent or empty status is NOT treated as a block — same as before, so
+ * documents that predate the verification flow keep working.
+ */
+function isVerifiedStatus(status) {
+    if (!status) return true;
+    return VERIFIED_STATUSES.includes(String(status).trim().toLowerCase());
+}
+
+/** Ceiling on a force-open produced by a bare app toggle. Errs toward closed. */
+const FORCE_OPEN_MAX_MINUTES = 120;
+
+/** Used when a toggle happens on a vendor with no resolvable next transition. */
+const OVERRIDE_FALLBACK_MINUTES = 120;
+
 // Scheduler tick granularity. Openings are floored and closings are ceiled to this
 // boundary so a shop is never LATE to open — see plan §2.3.
 const TICK_MINUTES = 10;
@@ -124,6 +168,41 @@ function minutesToHHmm(mins) {
 }
 
 /**
+ * Lowercases day keys before any lookup.
+ *
+ * WHY THIS EXISTS — vendor app v2.5 (versionCode 8, live on Play Store) builds
+ * its businessHours map from listOf("Monday", "Tuesday", ...). Everything that
+ * READS the map — this engine, the customer app, the admin console — looks up
+ * lowercase. Every lookup missed, so the engine saw a vendor with no open slots
+ * on any day and parked it on nextTransitionAt: null, which drops it out of the
+ * tick query permanently. That is why the scheduler had never opened a shop.
+ *
+ * The repair is deliberately on the READ side. Rewriting the stored keys to
+ * lowercase would work for the server and break v2.5's own hours dialog, which
+ * reads them capitalised — every merchant's dialog would silently revert to
+ * 09:00-21:00 defaults. So the stored document keeps whatever case it has, and
+ * every consumer normalises on the way in.
+ *
+ * Lowercase wins on collision: it is what the server and the admin console
+ * write, and therefore the more recently authoritative of the two.
+ */
+function normaliseHourKeys(hours) {
+    if (!hours || typeof hours !== 'object' || Array.isArray(hours)) return {};
+
+    const out = {};
+    for (const day of DAYS) {
+        if (Object.prototype.hasOwnProperty.call(hours, day)) out[day] = hours[day];
+    }
+    for (const [key, value] of Object.entries(hours)) {
+        const lower = String(key).trim().toLowerCase();
+        if (!DAYS.includes(lower)) continue;
+        if (Object.prototype.hasOwnProperty.call(out, lower)) continue;
+        out[lower] = value;
+    }
+    return out;
+}
+
+/**
  * Normalises a day config to a slot array, accepting BOTH the legacy
  * { isOpen, openTime, closeTime } shape used by vendor app v2.5 and the new
  * { isOpen, slots: [...] } shape. This is what makes the migration non-breaking.
@@ -179,7 +258,7 @@ function evaluateSchedule(vendor, now) {
     }
 
     // ---- 3. Not verified ----
-    if (v.verificationStatus && v.verificationStatus !== 'verified') {
+    if (!isVerifiedStatus(v.verificationStatus)) {
         return { shouldBeOpen: false, reason: REASON.UNVERIFIED, nextTransitionAt: null };
     }
 
@@ -218,7 +297,7 @@ function evaluateSchedule(vendor, now) {
         return { shouldBeOpen: v.isOnline === true, reason: REASON.MANUAL_MODE, nextTransitionAt: null };
     }
 
-    const hours = v.businessHours || {};
+    const hours = normaliseHourKeys(v.businessHours);
 
     // ---- 8. Inside a slot? ----
     // Check yesterday first, for a slot that wrapped past midnight into today.
@@ -335,6 +414,10 @@ function validateBusinessHours(hours) {
     if (!hours || typeof hours !== 'object') {
         return { valid: false, errors: ['businessHours must be an object'] };
     }
+    // Without this, a capitalised map validates as { valid: true } because the
+    // loop below finds nothing to check — garbage passes on its way to being
+    // silently discarded by withLegacyMirror.
+    hours = normaliseHourKeys(hours);
 
     for (const day of DAYS) {
         const cfg = hours[day];
@@ -407,6 +490,10 @@ function isValidTimezone(tz) {
  * defaults for every vendor. Keep writing them until v2.5 is fully retired.
  */
 function withLegacyMirror(hours) {
+    // Given a capitalised map this used to return {} — and that empty object
+    // replaced the vendor's stored hours. Normalise first.
+    hours = normaliseHourKeys(hours);
+
     const out = {};
     for (const day of DAYS) {
         const cfg = hours[day];
@@ -425,11 +512,175 @@ function withLegacyMirror(hours) {
             closeTime: sorted[sorted.length - 1].close    // legacy: last closing
         };
     }
+
+    // KEY-CASE MIRROR — the same compatibility contract as openTime/closeTime
+    // above, one level up. v2.5's BusinessHoursDialog reads hours["Monday"];
+    // this engine, the customer app and the admin console read hours["monday"].
+    // Emitting both keeps a vendor whose hours were edited server-side rendering
+    // correctly in the app that is actually installed on their phone.
+    //
+    // Both names point at the SAME object, so the two can never drift apart.
+    // Delete this loop, and the one in normaliseHourKeys, once v2.5 is retired.
+    for (const day of DAYS) {
+        if (out[day]) out[day.charAt(0).toUpperCase() + day.slice(1)] = out[day];
+    }
+
     return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* onWrite decision — pure, so recursion can be unit-tested            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Decides what (if anything) the vendors/{id} onWrite trigger should write back.
+ *
+ * Pure by design: the trigger writes to the very document that fires it, so the
+ * termination argument has to be testable without Firestore. Feed this function's
+ * own output back in as `after` and it must return null. See the recursion test.
+ *
+ * Timestamps come back as plain JS Dates; the caller converts them.
+ *
+ * TWO JOBS, in order:
+ *
+ *  A. MANUAL TOGGLE ADAPTER. Vendor app v2.5's Open/Closed switch writes
+ *     `isOnline` straight to Firestore. For an auto-scheduled vendor the next
+ *     tick would simply revert it, which reads to the merchant as "the app
+ *     closed my shop by itself". Rather than requiring a new app build, a bare
+ *     isOnline flip is translated into the manualOverride the vendor meant:
+ *     off -> PAUSED until they would next open, on -> FORCE_OPEN, capped.
+ *
+ *     "Bare" is the crux: the adapter only runs when NO schedule input changed.
+ *     An admin saving hours through the console also moves isOnline, and that
+ *     must reconcile normally, not be mistaken for a merchant tapping a switch.
+ *
+ *  B. RECONCILE. A schedule input changed, so recompute isOnline / reason /
+ *     nextTransitionAt. This is the original trigger behaviour, unchanged.
+ *
+ * @param {object|null} before  vendors/{id} before the write
+ * @param {object|null} after   vendors/{id} after the write
+ * @param {Date} now
+ * @returns {{kind:'adapter'|'revert'|'reconcile', update:object}|null}
+ * @throws whatever evaluateSchedule throws on a malformed document
+ */
+function decideVendorWrite(before, after, now) {
+    if (!after) return null;
+    const b = before || {};
+
+    const scheduleInputChanged = WATCHED_FIELDS.some(
+        k => JSON.stringify(b[k]) !== JSON.stringify(after[k])
+    );
+
+    /* ---- A. Manual toggle adapter ---- */
+    if (!scheduleInputChanged) {
+        const autoOn      = after.autoScheduleEnabled === true;
+        const onlineDelta = (b.isOnline === true) !== (after.isOnline === true);
+        const fromSelf    = after.statusChangedBy === 'scheduler' ||
+                            after.statusChangedBy === 'adapter';
+
+        // Nothing relevant moved. This is the loop guard: every write this
+        // function produces lands here on its second pass and stops.
+        if (!autoOn || !onlineDelta || fromSelf) return null;
+
+        const wantOpen = after.isOnline === true;
+
+        // A blocked vendor must never end up open, whoever flipped the switch.
+        const blockedReason = blockingReason(after);
+        if (blockedReason) {
+            if (!wantOpen) return null;   // already where it should be
+            return {
+                kind: 'revert',
+                update: {
+                    isOnline: false,
+                    scheduleReason: blockedReason,
+                    statusChangedBy: 'adapter',
+                    statusChangedAt: now
+                }
+            };
+        }
+
+        // Where would the schedule alone take this vendor next?
+        const base = evaluateSchedule({ ...after, manualOverride: null }, now);
+        let until = base.nextTransitionAt;
+
+        if (!until || until.getTime() <= now.getTime()) {
+            until = new Date(now.getTime() + OVERRIDE_FALLBACK_MINUTES * 60000);
+        }
+        if (wantOpen) {
+            // Opening outside your hours should not silently run all night.
+            const cap = new Date(now.getTime() + FORCE_OPEN_MAX_MINUTES * 60000);
+            if (until.getTime() > cap.getTime()) until = cap;
+        }
+
+        return {
+            kind: 'adapter',
+            update: {
+                manualOverride: {
+                    mode: wantOpen ? 'FORCE_OPEN' : 'PAUSED',
+                    until,
+                    reason: 'toggled in vendor app',
+                    setAt: now,
+                    setBy: 'vendor'
+                },
+                isOnline: wantOpen,
+                scheduleReason: wantOpen ? REASON.VENDOR_FORCED_OPEN : REASON.VENDOR_PAUSED,
+                nextTransitionAt: until,
+                statusChangedBy: 'adapter',
+                statusChangedAt: now
+            }
+        };
+    }
+
+    /* ---- B. Reconcile ---- */
+    const { shouldBeOpen, reason, nextTransitionAt } = evaluateSchedule(after, now);
+    const update = { nextTransitionAt: nextTransitionAt || null };
+
+    if (reason !== REASON.MANUAL_MODE) {
+        // Never override an admin block.
+        if (shouldBeOpen && (after.isSuspended === true || after.adminForceOffline === true)) {
+            return null;
+        }
+        if ((after.isOnline === true) !== shouldBeOpen) {
+            update.isOnline = shouldBeOpen;
+            // MUST be stamped. Without it, this write looks like a bare isOnline
+            // flip on the next pass and the adapter above converts a perfectly
+            // ordinary scheduled opening into a FORCE_OPEN override — which then
+            // suppresses the vendor's real hours until it expires.
+            update.statusChangedBy = 'scheduler';
+            update.statusChangedAt = now;
+        }
+        if (after.scheduleReason !== reason) update.scheduleReason = reason;
+    }
+
+    const currentPointer = toDate(after.nextTransitionAt);
+    const pointerSame = currentPointer === null
+        ? nextTransitionAt == null
+        : nextTransitionAt != null && currentPointer.getTime() === nextTransitionAt.getTime();
+
+    // Only the pointer in hand, and it is already right.
+    if (Object.keys(update).length === 1 && pointerSame) return null;
+
+    return { kind: 'reconcile', update };
+}
+
+/** The reason a vendor cannot be open at all, or null if nothing blocks them. */
+function blockingReason(v) {
+    if (v.isSuspended === true) return REASON.SUSPENDED;
+    if (v.adminForceOffline === true) return REASON.ADMIN_FORCED;
+    if (!isVerifiedStatus(v.verificationStatus)) return REASON.UNVERIFIED;
+    return null;
 }
 
 module.exports = {
     evaluateSchedule,
+    normaliseHourKeys,
+    decideVendorWrite,
+    isVerifiedStatus,
+    VERIFIED_STATUSES,
+    blockingReason,
+    WATCHED_FIELDS,
+    FORCE_OPEN_MAX_MINUTES,
+    OVERRIDE_FALLBACK_MINUTES,
     validateBusinessHours,
     isValidTimezone,
     withLegacyMirror,

@@ -3,6 +3,7 @@ import { db, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import {
     evaluateSchedule,
+    isVerifiedStatus,
     validateBusinessHours,
     isValidTimezone,
     withLegacyMirror,
@@ -39,6 +40,8 @@ function describe(vendorId: string, v: Record<string, unknown>) {
         blockers: {
             isSuspended: v.isSuspended === true,
             adminForceOffline: v.adminForceOffline === true,
+            // Raw value, for display. 'approved' is the platform's own vocabulary;
+            // see isVerifiedStatus() in @/lib/scheduleEngine for why both are accepted.
             verificationStatus: (v.verificationStatus as string) ?? 'pending',
         },
         // Drift detector: the scheduler should have reconciled these already.
@@ -143,7 +146,7 @@ async function handlePUT(request: Request) {
             const blocked =
                 current.isSuspended === true ||
                 current.adminForceOffline === true ||
-                (current.verificationStatus && current.verificationStatus !== 'verified');
+                !isVerifiedStatus(current.verificationStatus as string);
 
             if (!(shouldBeOpen && blocked)) {
                 update.isOnline = shouldBeOpen;

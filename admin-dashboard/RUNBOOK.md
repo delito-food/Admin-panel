@@ -106,7 +106,7 @@ If any of these fail, stop and roll back before going further.
 ## 5 · Backfill the ledger
 
 ```powershell
-node scripts\backfill-ledger.js --dry-run
+node scripts\backfill-ledger.js
 ```
 
 Read the per-vendor and per-partner table it prints. **Every gap of ₹1 or more
@@ -115,7 +115,7 @@ next payout run — that table is the first honest comparison of the two records
 that were previously reconciled with `Math.max()`.
 
 ```powershell
-node scripts\backfill-ledger.js
+node scripts\backfill-ledger.js --confirm
 ```
 
 Then reload the payouts screens: `balanceSource` should read `"ledger"` and

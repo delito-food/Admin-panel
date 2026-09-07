@@ -1,8 +1,8 @@
 /**
  * Backfill the append-only ledger from history.
  *
- *   node scripts/backfill-ledger.js --dry-run    # report only, writes nothing
- *   node scripts/backfill-ledger.js              # write the rows
+ *   node scripts/backfill-ledger.js              # report only, writes nothing
+ *   node scripts/backfill-ledger.js --confirm    # write the rows
  *
  * Posts, per vendor:
  *   EARNING     + the item total of every delivered order
@@ -23,7 +23,11 @@ const admin = require('firebase-admin');
 const fs = require('fs');
 const path = require('path');
 
-const DRY_RUN = process.argv.includes('--dry-run');
+// Preview by default, write only on --confirm. Every script in this set
+// behaves the same way, so no single one of them is the odd one that writes
+// when you forget a flag.
+const CONFIRM = process.argv.includes('--confirm');
+const DRY_RUN = !CONFIRM;
 
 const env = {};
 fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf8').split('\n').forEach((line) => {
@@ -228,7 +232,7 @@ function toIso(v) {
     console.log('Each gap is a real discrepancy that predates the ledger — investigate before paying.');
 
     if (DRY_RUN) {
-        console.log('\nDry run — nothing written. Re-run without --dry-run to post these rows.');
+        console.log('\nNothing written. Re-run with --confirm to post these rows.');
         process.exit(0);
     }
 
