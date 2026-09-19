@@ -101,6 +101,14 @@ async function handleGET() {
             vendorEarning: number;
             vendorPlatformCut: number;
             vendorGstOnPlatformCut: number;
+            /** Co-funded offer: total taken off the customer's food bill. */
+            campaignDiscount: number;
+            /** Delito's share of it — a real marketing cost, not a pass-through. */
+            campaignPlatformFunded: number;
+            campaignVendorFunded: number;
+            promoDiscount: number;
+            coinDiscount: number;
+            hungerGameDiscount: number;
             refundAmount: number;
             refundStatus: string;
             codSettled: boolean;
@@ -132,6 +140,12 @@ async function handleGET() {
                 vendorEarning: Number(o.vendorEarning || 0),
                 vendorPlatformCut: Number(o.vendorPlatformCut || 0),
                 vendorGstOnPlatformCut: Number(o.vendorGstOnPlatformCut || 0),
+                campaignDiscount: Number(o.campaignDiscount || 0),
+                campaignPlatformFunded: Number(o.campaignPlatformFunded || 0),
+                campaignVendorFunded: Number(o.campaignVendorFunded || 0),
+                promoDiscount: Number(o.promoDiscount || 0),
+                coinDiscount: Number(o.coinDiscount || 0),
+                hungerGameDiscount: Number(o.hungerGameDiscount || 0),
                 refundAmount: Number(o.refundAmount || 0),
                 refundStatus: String(o.refundStatus || ''),
                 codSettled: o.codSettled === true,
@@ -195,7 +209,9 @@ async function handleGET() {
             // Vendor gets: subtotal - commission - GST on commission
             const vendorPayouts = delivered.reduce((s, o) => {
                 // Use stored vendorEarning if available, else calculate
-                if (o.vendorEarning > 0) return s + o.vendorEarning;
+                // Stored figure wins whenever it exists — recomputing ignores the
+                // vendor's share of a co-funded offer and overpays. (§3 H5)
+                if (Number.isFinite(o.vendorEarning) && o.vendorEarning >= 0 && (o.vendorEarning > 0 || o.campaignDiscount > 0)) return s + o.vendorEarning;
                 const comm = o.vendorPlatformCut > 0 ? o.vendorPlatformCut : Math.round((o.originalItemTotal || o.subtotal) * 0.15 * 10) / 10;
                 const gst = o.vendorGstOnPlatformCut > 0 ? o.vendorGstOnPlatformCut : Math.round(comm * 0.18 * 10) / 10;
                 return s + Math.round((o.subtotal - comm - gst) * 10) / 10;
@@ -224,9 +240,27 @@ async function handleGET() {
             }, 0);
             const totalGstCollectedFromCustomer = Math.round((gstOnFood + gstOnDeliveryServices) * 100) / 100;
 
-            // Platform net income = Commission earned - GST on commission (remitted to govt) + delivery fee P&L + small order fees
-            // GST collected from customers is a pass-through to govt, NOT platform income
-            const platformNet = commission - gstOnCommission + deliveryFeeProfit + smallOrderFees;
+            // What Delito itself paid for to win these orders. Every one of these comes
+            // off the customer's bill without anyone else funding it:
+            //   campaignPlatformFunded — Delito's share of a co-funded merchant offer
+            //   promo / coins / HungerGame — wholly Delito-funded
+            // The vendor's share of a co-funded offer is NOT here: it is already inside
+            // the vendor payout figure below.
+            const platformFundedDiscounts = delivered.reduce(
+                (s, o) => s + o.campaignPlatformFunded + o.promoDiscount + o.coinDiscount + o.hungerGameDiscount,
+                0
+            );
+            const campaignPlatformFunded = delivered.reduce((s, o) => s + o.campaignPlatformFunded, 0);
+            // Read, not derived. `campaignDiscount - campaignPlatformFunded` looks
+            // equivalent and is not: before settlement stamps the split — or if it fails
+            // and the error is swallowed — platformFunded is 0, so the derivation handed
+            // the vendor the ENTIRE discount and read platformNet a full D too high.
+            const campaignVendorFunded = delivered.reduce((s, o) => s + o.campaignVendorFunded, 0);
+
+            // Platform net income = Commission earned - GST on commission (remitted to govt)
+            // + delivery fee P&L + small order fees - what Delito funded in discounts.
+            // GST collected from customers is a pass-through to govt, NOT platform income.
+            const platformNet = commission - gstOnCommission + deliveryFeeProfit + smallOrderFees - platformFundedDiscounts;
 
             // Total outflow = vendor payouts + delivery payouts + GST on commission + tips + refunds
             // Note: Customer-facing GST (food 5% + services 18%) is a pass-through and is
@@ -258,6 +292,14 @@ async function handleGET() {
                 tipPayouts: Math.round(tipPayouts),
                 refundsIssued: Math.round(refundsIssued),
                 totalOutflow: Math.round(totalOutflow),
+                // Marketing spend Delito funded out of its own pocket. `platformNet`
+                // now nets these off; `platformNetBeforeDiscounts` is the figure this
+                // report showed before they were counted, kept so the change is visible
+                // rather than silent.
+                platformFundedDiscounts: Math.round(platformFundedDiscounts),
+                platformNetBeforeDiscounts: Math.round(platformNet + platformFundedDiscounts),
+                campaignPlatformFunded: Math.round(campaignPlatformFunded),
+                campaignVendorFunded: Math.round(campaignVendorFunded),
                 // Net
                 deliveryFeeProfit: Math.round(deliveryFeeProfit),
                 platformNet: Math.round(platformNet),
@@ -308,7 +350,9 @@ async function handleGET() {
                 return s + (o.deliveryPersonEarnings || (o.distanceKm > 0 ? Math.max(15, Math.round((10 + o.distanceKm * 6.5) * 10) / 10) : 15));
             }, 0);
             const vPay = delivered.reduce((s, o) => {
-                if (o.vendorEarning > 0) return s + o.vendorEarning;
+                // Same rule as above: never recompute over a stored earning, which on a
+                // co-funded offer order already has the vendor's share taken out.
+                if (Number.isFinite(o.vendorEarning) && (o.vendorEarning > 0 || o.campaignDiscount > 0)) return s + o.vendorEarning;
                 const c = o.vendorPlatformCut > 0 ? o.vendorPlatformCut : Math.round(o.subtotal * 0.15 * 10) / 10;
                 const g = o.vendorGstOnPlatformCut > 0 ? o.vendorGstOnPlatformCut : Math.round(c * 0.18 * 10) / 10;
                 return s + Math.round((o.subtotal - c - g) * 10) / 10;
@@ -321,13 +365,20 @@ async function handleGET() {
                 return s + Math.round(c * 0.18 * 10) / 10;
             }, 0);
 
+            // Same definition as the period figure above, so the chart and the summary
+            // cannot tell different stories about the same day.
+            const dayPlatformFunded = delivered.reduce(
+                (s, o) => s + o.campaignPlatformFunded + o.promoDiscount + o.coinDiscount + o.hungerGameDiscount,
+                0
+            );
+
             dailyTrend.push({
                 date: dayStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
                 revenue: Math.round(delivered.reduce((s, o) => s + o.total, 0)),
                 commission: comm,
                 vendorPayout: Math.round(vPay),
                 deliveryPayout: delPayouts,
-                platformNet: comm - commGst + (delFees - delPayouts) + smallFee,
+                platformNet: Math.round(comm - commGst + (delFees - delPayouts) + smallFee - dayPlatformFunded),
                 orders: delivered.length,
             });
         }

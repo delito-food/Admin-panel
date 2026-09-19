@@ -70,6 +70,17 @@ interface WeekRow {
     commissionBase: number;
     commission: number;
     gstOnCommission: number;
+    /**
+     * The restaurant's own share of Delito co-funded offers in this week.
+     *
+     * NOT a taxable supply and NOT part of the commission — it is a promotional
+     * contribution the restaurant agreed to, shown as its own line so a payout can be
+     * explained rupee by rupee (CO_FUNDED_OFFERS_IMPLEMENTATION_PLAN.md §1.5 R4).
+     */
+    offerContribution: number;
+    offerOrders: number;
+    /** The taxable supply — commission + its GST. Never includes the offer share. */
+    commissionPlusGst: number;
     totalDeduction: number;
     netPayout: number;
 }
@@ -82,6 +93,9 @@ interface MonthAggregate {
         commissionBase: number;
         commission: number;
         gstOnCommission: number;
+        commissionPlusGst: number;
+        offerContribution: number;
+        offerOrders: number;
         totalDeduction: number;
         netPayout: number;
     };
@@ -118,6 +132,8 @@ function aggregateMonth(
         let commissionBase = 0;
         let commission = 0;
         let gstOnCommission = 0;
+        let offerContribution = 0;
+        let offerOrders = 0;
 
         for (const o of weekOrders) {
             const itemTotal = num(o.itemTotal) || num(o.subtotal);
@@ -126,13 +142,24 @@ function aggregateMonth(
             commissionBase += c.baseAmount;
             commission += c.amount;
             gstOnCommission += c.gst;
+            const vendorFunded = num(o.campaignVendorFunded);
+            if (vendorFunded > 0) {
+                offerContribution += vendorFunded;
+                offerOrders += 1;
+            }
         }
 
         grossSales = r2(grossSales);
         commissionBase = r2(commissionBase);
         commission = r2(commission);
         gstOnCommission = r2(gstOnCommission);
-        const totalDeduction = r2(commission + gstOnCommission);
+        offerContribution = r2(offerContribution);
+        // Two different totals, deliberately. `commissionPlusGst` is the taxable supply
+        // this document invoices; `totalDeduction` is everything held back from the
+        // payout, which also includes the vendor's own offer share. The offer share is
+        // NOT a supply by Delito and must never reach a GST figure.
+        const commissionPlusGst = r2(commission + gstOnCommission);
+        const totalDeduction = r2(commissionPlusGst + offerContribution);
 
         return {
             weekLabel: `Week ${idx + 1} (${String(startDay).padStart(2, '0')} ${mn} – ${String(endDay).padStart(2, '0')} ${mn} ${year})`,
@@ -141,6 +168,9 @@ function aggregateMonth(
             commissionBase,
             commission,
             gstOnCommission,
+            commissionPlusGst,
+            offerContribution,
+            offerOrders,
             totalDeduction,
             netPayout: r2(grossSales - totalDeduction),
         };
@@ -150,7 +180,9 @@ function aggregateMonth(
     const commission = sum((w) => w.commission);
     const gstOnCommission = sum((w) => w.gstOnCommission);
     const grossSales = sum((w) => w.grossSales);
-    const totalDeduction = r2(commission + gstOnCommission);
+    const offerContribution = sum((w) => w.offerContribution);
+    const commissionPlusGst = r2(commission + gstOnCommission);
+    const totalDeduction = r2(commissionPlusGst + offerContribution);
 
     return {
         weeklyBreakdown,
@@ -160,6 +192,9 @@ function aggregateMonth(
             commissionBase: sum((w) => w.commissionBase),
             commission,
             gstOnCommission,
+            commissionPlusGst,
+            offerContribution,
+            offerOrders: weeklyBreakdown.reduce((s, w) => s + w.offerOrders, 0),
             totalDeduction,
             netPayout: r2(grossSales - totalDeduction),
         },
@@ -387,7 +422,11 @@ async function handleGET(request: NextRequest, _ctx: unknown, auth: AdminResult)
                 sgstRate: interState ? 0 : PRICING.GST_ON_COMMISSION / 2,
                 sgstAmount: tax.sgst,
                 totalGst: tax.total,
-                totalCommissionPlusGst: aggregate.monthlyTotals.totalDeduction,
+                // The taxable supply only. This used to read `totalDeduction`, which
+                // put the vendor's offer share inside the GST breakup box — the box
+                // stopped adding up (150 + 27 ≠ 237) and the invoice overstated the
+                // value of the supply by exactly that share.
+                totalCommissionPlusGst: aggregate.monthlyTotals.commissionPlusGst,
             },
         };
 

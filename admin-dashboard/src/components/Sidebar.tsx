@@ -54,6 +54,7 @@ const navigation: NavItem[] = [
         icon: <ShieldCheck size={20} />,
         children: [
             { label: 'Vendors', href: '/verification/vendors' },
+            { label: 'Outlet Photos', href: '/verification/shop-photos' },
             { label: 'Delivery Partners', href: '/verification/delivery' },
             { label: 'Documents', href: '/documents' },
         ],
@@ -66,6 +67,13 @@ const navigation: NavItem[] = [
     {
         label: 'Special Offers',
         href: '/special-offers',
+        icon: <Sparkles size={20} />,
+    },
+    {
+        // Offers Delito co-funds with a restaurant. Separate from Special Offers, which
+        // are the restaurant's own and wholly theirs to pay for.
+        label: 'Co-funded Offers',
+        href: '/campaigns',
         icon: <Sparkles size={20} />,
     },
     {

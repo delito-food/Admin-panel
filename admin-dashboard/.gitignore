@@ -72,3 +72,10 @@ ehthumbs.db
 # ---- Pre-change working copies ----
 # Kept locally as a rollback aid; the published history is the real one.
 *.bak
+
+# Local backups and scratch
+_backup_pre_*/
+_to_delete/
+_stage_theme/
+_claude_transfer/
+Claude outputs/

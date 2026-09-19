@@ -70,11 +70,11 @@ interface PreviewData {
     commissionRate: number;
     weeklyBreakdown: Array<{
         weekLabel: string; orders: number; grossSales: number; commission: number;
-        gstOnCommission: number; totalDeduction: number; netPayout: number;
+        gstOnCommission: number; offerContribution?: number; totalDeduction: number; netPayout: number;
     }>;
     monthlyTotals: {
         orders: number; grossSales: number; commission: number;
-        gstOnCommission: number; totalDeduction: number; netPayout: number;
+        gstOnCommission: number; offerContribution?: number; totalDeduction: number; netPayout: number;
     };
     gstBreakup: {
         igstRate: number; igstAmount: number; cgstRate: number; cgstAmount: number;
@@ -666,6 +666,10 @@ export default function CommissionInvoicesPage() {
                                                             <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>Gross Sales</th>
                                                             <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>Commission</th>
                                                             <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>GST 18%</th>
+                                                            {/* Only when there is one. The admin checks this preview BEFORE issuing a
+                                                                serial number, so it has to describe the month the same way the PDF
+                                                                does — without it, Total Ded. had an unexplained gap. */}
+                                                            {(previewData.monthlyTotals.offerContribution || 0) > 0 && <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>Promo Share</th>}
                                                             <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>Total Ded.</th>
                                                             <th style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 600 }}>Net Payout</th>
                                                         </tr>
@@ -678,6 +682,7 @@ export default function CommissionInvoicesPage() {
                                                                 <td style={{ padding: '7px 6px', textAlign: 'right' }}>{fmtC(w.grossSales)}</td>
                                                                 <td style={{ padding: '7px 6px', textAlign: 'right' }}>{fmtC(w.commission)}</td>
                                                                 <td style={{ padding: '7px 6px', textAlign: 'right' }}>{fmtC(w.gstOnCommission)}</td>
+                                                                {(previewData.monthlyTotals.offerContribution || 0) > 0 && <td style={{ padding: '7px 6px', textAlign: 'right' }}>{fmtC(w.offerContribution || 0)}</td>}
                                                                 <td style={{ padding: '7px 6px', textAlign: 'right' }}>{fmtC(w.totalDeduction)}</td>
                                                                 <td style={{ padding: '7px 6px', textAlign: 'right', color: '#2E7D32', fontWeight: 600 }}>{fmtC(w.netPayout)}</td>
                                                             </tr>
@@ -689,6 +694,7 @@ export default function CommissionInvoicesPage() {
                                                             <td style={{ padding: '8px 6px', textAlign: 'right', color: '#1B5E20' }}>{fmtC(previewData.monthlyTotals.grossSales)}</td>
                                                             <td style={{ padding: '8px 6px', textAlign: 'right', color: '#E65100' }}>{fmtC(previewData.monthlyTotals.commission)}</td>
                                                             <td style={{ padding: '8px 6px', textAlign: 'right', color: '#7B1FA2' }}>{fmtC(previewData.monthlyTotals.gstOnCommission)}</td>
+                                                            {(previewData.monthlyTotals.offerContribution || 0) > 0 && <td style={{ padding: '8px 6px', textAlign: 'right', color: '#EF6C00' }}>{fmtC(previewData.monthlyTotals.offerContribution || 0)}</td>}
                                                             <td style={{ padding: '8px 6px', textAlign: 'right', color: '#C62828' }}>{fmtC(previewData.monthlyTotals.totalDeduction)}</td>
                                                             <td style={{ padding: '8px 6px', textAlign: 'right', color: '#2E7D32' }}>{fmtC(previewData.monthlyTotals.netPayout)}</td>
                                                         </tr>

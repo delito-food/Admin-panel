@@ -29,11 +29,12 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  *
  *   EARNING            +  the vendor's share of a delivered order
  *   COMMISSION         −  platform commission and its GST
+ *   OFFER_SHARE        −  the vendor's own share of a co-funded Delito offer
  *   PAYOUT             −  money actually paid out
  *   CREDIT_NOTE        −  reversal of an invoiced supply
  *   ADJUSTMENT         ±  a manual correction, always with a reason
  */
-export type LedgerEntryType = 'EARNING' | 'COMMISSION' | 'PAYOUT' | 'CREDIT_NOTE' | 'ADJUSTMENT';
+export type LedgerEntryType = 'EARNING' | 'COMMISSION' | 'OFFER_SHARE' | 'PAYOUT' | 'CREDIT_NOTE' | 'ADJUSTMENT';
 
 export type LedgerPartyType = 'vendor' | 'deliveryPartner';
 
@@ -131,6 +132,8 @@ export interface LedgerBalance {
     balance: number;
     earnings: number;
     commission: number;
+    /** Co-funded offer shares this vendor has funded, as a positive number. */
+    offerShare: number;
     creditNotes: number;
     paidOut: number;
     adjustments: number;
@@ -140,7 +143,7 @@ export interface LedgerBalance {
 
 export function emptyBalance(partyId: string): LedgerBalance {
     return {
-        partyId, balance: 0, earnings: 0, commission: 0,
+        partyId, balance: 0, earnings: 0, commission: 0, offerShare: 0,
         creditNotes: 0, paidOut: 0, adjustments: 0, entryCount: 0, lastEntryAt: null,
     };
 }
@@ -153,6 +156,7 @@ export function accumulate(balance: LedgerBalance, entry: any): void {
     switch (entry.entryType as LedgerEntryType) {
         case 'EARNING': balance.earnings = r2(balance.earnings + amount); break;
         case 'COMMISSION': balance.commission = r2(balance.commission + Math.abs(amount)); break;
+        case 'OFFER_SHARE': balance.offerShare = r2(balance.offerShare + Math.abs(amount)); break;
         case 'CREDIT_NOTE': balance.creditNotes = r2(balance.creditNotes + Math.abs(amount)); break;
         case 'PAYOUT': balance.paidOut = r2(balance.paidOut + Math.abs(amount)); break;
         case 'ADJUSTMENT': balance.adjustments = r2(balance.adjustments + amount); break;

@@ -1,0 +1,5 @@
+Vendor Heera Spicy  Cafe (ID: F7wmq8u6A8cuSThlYyWSOn2ppDn1): pendingPayout = 41.2, totalEarnings = 1797, paidAmount = 1437.5
+Vendor Taste hub (ID: itQDyz7CRTf6MhAzXQEECAIKZss1): pendingPayout = 510.1, totalEarnings = 620, paidAmount = undefined
+Vendor Paratha Pardise  (ID: pDpBNvOZhIgY4qXV64U7MLRYZwp1): pendingPayout = 19.39999999999999, totalEarnings = 109.99999999999999, paidAmount = 71.1
+Vendor SHREE KEDAR YUMMY FOOD CORNER  (ID: s9cLI1fxPYg6FYvq8rlNk7EnYnt1): pendingPayout = 939.1500000000001, totalEarnings = 4374.25, paidAmount = 2660.4
+Total vendors with doc.pendingPayout > 0: 4

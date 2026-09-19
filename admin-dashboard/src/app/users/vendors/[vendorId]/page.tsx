@@ -49,6 +49,8 @@ interface VendorOrder {
     total: number;
     commission: number;
     gstOnCommission: number;
+    /** The restaurant's own share of a co-funded Delito offer, already inside vendorEarning. */
+    offerContribution?: number;
     totalDeduction: number;
     vendorEarning: number;
     refundStatus: string;
@@ -562,11 +564,11 @@ export default function VendorDetailPage() {
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                                 <thead>
                                     <tr style={{ background: 'var(--surface)' }}>
-                                        {['Order', 'Date', 'Customer', 'Items', 'Item Total', 'Commission + GST', 'Vendor Earning', 'Payment', 'Status'].map((h, i) => (
+                                        {['Order', 'Date', 'Customer', 'Items', 'Item Total', 'Commission + GST', 'Offer Share', 'Vendor Earning', 'Payment', 'Status'].map((h, i) => (
                                             <th
                                                 key={h}
                                                 style={{
-                                                    padding: '10px 14px', textAlign: i >= 4 && i <= 6 ? 'right' : 'left',
+                                                    padding: '10px 14px', textAlign: i >= 4 && i <= 7 ? 'right' : 'left',
                                                     fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.04em',
                                                     textTransform: 'uppercase', color: 'var(--foreground-secondary)',
                                                     borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
@@ -629,6 +631,11 @@ export default function VendorDetailPage() {
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'right', color: '#EF4444', whiteSpace: 'nowrap' }}>
                                                     −{formatCurrency(order.totalDeduction)}
+                                                </td>
+                                                {/* The restaurant's own share of a Delito offer. Already inside Vendor
+                                                    Earning — shown so the row adds up instead of leaving a silent gap. */}
+                                                <td style={{ padding: '11px 14px', textAlign: 'right', color: (order.offerContribution || 0) > 0 ? '#EF6C00' : 'var(--foreground-secondary)', whiteSpace: 'nowrap' }}>
+                                                    {(order.offerContribution || 0) > 0 ? `\u2212${formatCurrency(order.offerContribution || 0)}` : '\u2014'}
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 700, color: '#10B981', whiteSpace: 'nowrap' }}>
                                                     {formatCurrency(order.vendorEarning)}

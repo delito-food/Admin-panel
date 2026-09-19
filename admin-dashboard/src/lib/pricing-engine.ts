@@ -97,12 +97,23 @@ export interface DiscountLine {
     /** Machine key, e.g. 'promo'. */
     key: string;
     label: string;
-    /** The rupees the customer saved, tax inclusive. */
+    /** The rupees the customer saved. Tax inclusive unless `preTax` is true. */
     amount: number;
     /** Which component's taxable value it reduces. */
     appliedTo: 'food' | 'delivery' | 'platform';
     /** Whether it was funded by the vendor or by Delito. */
     fundedBy: 'vendor' | 'platform';
+    /**
+     * True for a discount the app took off BEFORE tax, so the tax on the order was
+     * already charged on the reduced figure.
+     *
+     * Co-funded merchant offers work this way (PricingCalculator.kt computes
+     * gstOnFood on `itemTotal − campaignDiscount`), exactly as an aggregator bill
+     * reads. Such a line reduces taxable value only — splitting it back out of a
+     * tax-inclusive figure, as the post-tax discounts below are, would take the tax
+     * off twice and leave the invoice short of what the customer paid.
+     */
+    preTax?: boolean;
 }
 
 export interface CommissionResult {
@@ -224,7 +235,17 @@ export function computeOrderEconomics(
 
     // Tax as charged. gstOnServices covers delivery + platform together and is
     // split between them in proportion to their taxable values.
-    const foodTaxCharged = num(order.gstOnFood) > 0 ? r2(num(order.gstOnFood)) : taxOn(foodGross, RATE.FOOD);
+    // The fallback base is the food AFTER any campaign discount, because that is what
+    // PricingCalculator charges GST on. Falling back to the undiscounted food invented
+    // tax on money the customer never paid — most visibly on a fully discounted order,
+    // which came out as ₹0 taxable with ₹50 of tax sitting beside it.
+    const campaignOffFood = Math.max(0, r2(num(order.campaignDiscount)));
+    // foodGstBase 'gross' (current app): GST was charged on the food before every order
+    // discount, including the co-funded offer. Older orders took the offer off first.
+    const grossFoodOrder = String(order.foodGstBase || '') === 'gross';
+    const foodTaxCharged = num(order.gstOnFood) > 0
+        ? r2(num(order.gstOnFood))
+        : taxOn(Math.max(0, r2(foodGross - (grossFoodOrder ? 0 : campaignOffFood))), RATE.FOOD);
     const serviceBase = r2(deliveryGross + platformGross);
     const serviceTaxCharged = num(order.gstOnServices) > 0
         ? r2(num(order.gstOnServices))
@@ -242,6 +263,15 @@ export function computeOrderEconomics(
     // already returns deliveryFee = 0 when a free-delivery offer applies, so
     // `deliveryDiscount` is a display figure and subtracting it here would
     // credit the customer twice.
+    // Co-funded merchant offer (CO_FUNDED_OFFERS_IMPLEMENTATION_PLAN.md). Taken off the
+    // food BEFORE tax by the app, and split between the restaurant and Delito by
+    // functions/orderFinance.js. `itemTotal` is untouched by it — it stays the vendor's
+    // gross — so the discount has to be subtracted here, from taxable value.
+    const campaign = r2(num(order.campaignDiscount));
+    const campaignVendor = r2(num(order.campaignVendorFunded));
+    const campaignPlatform = r2(num(order.campaignPlatformFunded));
+    const campaignSplitKnown = campaign > 0 && Math.abs(campaignVendor + campaignPlatform - campaign) <= 0.05;
+
     const promo = r2(num(order.promoDiscount));
     const coin = r2(num(order.coinDiscount));
     const hungerGameTotal = r2(num(order.hungerGameDiscount));
@@ -255,17 +285,43 @@ export function computeOrderEconomics(
         // "you saved" figure, never subtracted again.
         discounts.push({ key: 'item', label: 'Menu & offer discount', amount: itemDiscountTotal, appliedTo: 'food', fundedBy: 'vendor' });
     }
+    if (campaign > 0) {
+        const label = String(order.campaignTitle || 'Offer discount');
+        if (campaignSplitKnown) {
+            // Two lines, because the money comes from two places. Both reduce taxable
+            // value identically; only the funding differs, and that is what the payout
+            // and the commission statement read.
+            if (campaignVendor > 0) discounts.push({ key: 'campaignVendor', label: `${label} — restaurant funded`, amount: campaignVendor, appliedTo: 'food', fundedBy: 'vendor', preTax: !grossFoodOrder });
+            if (campaignPlatform > 0) discounts.push({ key: 'campaignPlatform', label: `${label} — Delito funded`, amount: campaignPlatform, appliedTo: 'food', fundedBy: 'platform', preTax: !grossFoodOrder });
+        } else {
+            // Settlement has not stamped the split yet (it lands a second after the
+            // order). Attribute it to Delito for now; the funding split never changes
+            // the customer's invoice, only who bore it.
+            discounts.push({ key: 'campaign', label, amount: campaign, appliedTo: 'food', fundedBy: 'platform', preTax: !grossFoodOrder });
+        }
+    }
     if (promo > 0) discounts.push({ key: 'promo', label: 'Promo code', amount: promo, appliedTo: 'food', fundedBy: 'platform' });
     if (coin > 0) discounts.push({ key: 'coin', label: 'Delito coins redeemed', amount: coin, appliedTo: 'food', fundedBy: 'platform' });
     if (hungerGameFood > 0) discounts.push({ key: 'hungerGameFood', label: 'HungerGame reward', amount: hungerGameFood, appliedTo: 'food', fundedBy: 'platform' });
     if (hungerGameDelivery > 0) discounts.push({ key: 'hungerGameDelivery', label: 'HungerGame free delivery', amount: hungerGameDelivery, appliedTo: 'delivery', fundedBy: 'platform' });
 
-    // Only post-tax discounts reduce the component totals here; the item
-    // discount is already inside the line prices.
-    const postTaxDiscounts = discounts.filter(d => d.key !== 'item');
+    // Only post-tax discounts are split back out of a tax-inclusive figure. The item
+    // discount is already inside the line prices, and a pre-tax discount (a co-funded
+    // offer) reduces taxable value directly — see `preTaxOf` below.
+    const postTaxDiscounts = discounts.filter(d => d.key !== 'item' && d.preTax !== true);
+    const preTaxOf = { food: 0, delivery: 0, platform: 0 };
+    for (const d of discounts) {
+        if (d.preTax === true) preTaxOf[d.appliedTo] = r2(preTaxOf[d.appliedTo] + d.amount);
+    }
 
     // ── 4. Apply discounts to components, tax-inclusively ─────────────────
-    const grossOf = { food: r2(foodGross + foodTaxCharged), delivery: r2(deliveryGross + deliveryTaxCharged), platform: r2(platformGross + platformTaxCharged) };
+    // Room left for a post-tax discount, net of anything already taken off pre-tax:
+    // coins cannot claim rupees a co-funded offer has already removed from the bill.
+    const grossOf = {
+        food: r2(Math.max(0, foodGross - preTaxOf.food) + foodTaxCharged),
+        delivery: r2(Math.max(0, deliveryGross - preTaxOf.delivery) + deliveryTaxCharged),
+        platform: r2(Math.max(0, platformGross - preTaxOf.platform) + platformTaxCharged),
+    };
     const claimed = { food: 0, delivery: 0, platform: 0 };
     for (const d of postTaxDiscounts) {
         const room = Math.max(0, grossOf[d.appliedTo] - claimed[d.appliedTo]);
@@ -281,13 +337,16 @@ export function computeOrderEconomics(
         grossTaxable: number, taxCharged: number
     ): Component => {
         const reduction = splitInclusive(claimed[key], ratePercent);
-        const taxableValue = r2(Math.max(0, grossTaxable - reduction.taxableValue));
+        // The pre-tax part comes straight off taxable value: the tax the app charged
+        // (taxCharged) was already computed on the reduced base.
+        const preTax = Math.min(preTaxOf[key], grossTaxable);
+        const taxableValue = r2(Math.max(0, grossTaxable - preTax - reduction.taxableValue));
         const totalTax = r2(Math.max(0, taxCharged - reduction.tax));
         const split: TaxSplit = splitTax(totalTax, interState);
         return {
             key, label, hsn, ratePercent,
             grossTaxableValue: r2(grossTaxable),
-            discountOnTaxableValue: r2(reduction.taxableValue),
+            discountOnTaxableValue: r2(preTax + reduction.taxableValue),
             taxableValue,
             cgst: split.cgst,
             sgst: split.sgst,

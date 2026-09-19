@@ -104,6 +104,12 @@ async function handleGET(request: Request) {
                 total: round2((data.total as number) || 0),
                 commission: round2(commission),
                 gstOnCommission: round2(gstOnCommission),
+                // The restaurant's own share of a co-funded Delito offer. It is ALREADY
+                // inside vendorEarning (the server subtracts it at settlement), so it is
+                // reported as its own column rather than folded into the commission —
+                // without it the table read itemTotal − totalDeduction ≠ vendorEarning on
+                // every campaign order, with nothing on screen explaining the gap.
+                offerContribution: round2(Math.max(0, (data.campaignVendorFunded as number) || 0)),
                 totalDeduction: round2(commission + gstOnCommission),
                 vendorEarning: round2(vendorEarning),
                 refundStatus: (data.refundStatus || '') as string,

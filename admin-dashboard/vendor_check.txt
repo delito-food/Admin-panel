@@ -1,0 +1,16 @@
+=== VENDOR DOC ===
+Name: janta restaurant 
+pendingPayout: 0
+totalEarnings: undefined
+paidAmount: 760.4
+totalCommission: undefined
+
+=== LEDGER ===
+Entry count: 1
+Calculated Balance (earnings-commission+etc): -492.1
+Calculated Paid Out: 492.1
+=== ORDERS ===
+Total Delivered Orders: 7
+Sum of Estimated vendorEarnings: 1035.3
+=== PAYOUTS COLLECTION ===
+Confirmed payouts total: 760.4000000000001

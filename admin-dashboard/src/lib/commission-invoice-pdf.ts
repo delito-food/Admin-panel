@@ -299,12 +299,20 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
     doc.text('WEEKLY SALES & COMMISSION BREAKDOWN', margin, y);
     y += 3;
 
+    // "PROMO SHARE" is the restaurant's own contribution to a Delito co-funded offer.
+    // It is not commission and carries no GST — it is shown as its own column so a
+    // payout can be explained line by line, which is the whole point of the feature
+    // (CO_FUNDED_OFFERS_IMPLEMENTATION_PLAN.md §1.5 R4).
+    const hasOfferContribution = data.weeklyBreakdown.some(w => (w.offerContribution || 0) > 0)
+        || (data.monthlyTotals.offerContribution || 0) > 0;
+
     const weeklyRows = data.weeklyBreakdown.map(w => [
         w.weekLabel,
         String(w.orders),
         `\u20B9${fmtC(w.grossSales)}`,
         `\u20B9${fmtC(w.commission)}`,
         `\u20B9${fmtC(w.gstOnCommission)}`,
+        ...(hasOfferContribution ? [`\u20B9${fmtC(w.offerContribution || 0)}`] : []),
         `\u20B9${fmtC(w.totalDeduction)}`,
         `\u20B9${fmtC(w.netPayout)}`,
     ]);
@@ -316,6 +324,7 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
         `\u20B9${fmtC(mt.grossSales)}`,
         `\u20B9${fmtC(mt.commission)}`,
         `\u20B9${fmtC(mt.gstOnCommission)}`,
+        ...(hasOfferContribution ? [`\u20B9${fmtC(mt.offerContribution || 0)}`] : []),
         `\u20B9${fmtC(mt.totalDeduction)}`,
         `\u20B9${fmtC(mt.netPayout)}`,
     ];
@@ -328,6 +337,7 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
         head: [[
             'WEEK / PERIOD', 'ORDERS', 'GROSS SALES (\u20B9)',
             'COMMISSION \u20B9', 'GST ON COMM 18% (\u20B9)',
+            ...(hasOfferContribution ? ['PROMO SHARE (\u20B9)'] : []),
             'TOTAL DEDUCTION (\u20B9)', 'NET PAYOUT (\u20B9)',
         ]],
         body: weeklyRows,
@@ -349,15 +359,28 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
             fontSize: 5,
             halign: 'center',
         },
-        columnStyles: {
-            0: { halign: 'left', cellWidth: contentWidth * 0.17 },
-            1: { halign: 'center', cellWidth: contentWidth * 0.08 },
-            2: { halign: 'right', cellWidth: contentWidth * 0.14 },
-            3: { halign: 'right', cellWidth: contentWidth * 0.12 },
-            4: { halign: 'right', cellWidth: contentWidth * 0.15 },
-            5: { halign: 'right', cellWidth: contentWidth * 0.16 },
-            6: { halign: 'right', cellWidth: contentWidth * 0.18 },
-        },
+        // Widths are shared out over however many columns this month needs: the promo
+        // share column only appears when the restaurant actually funded an offer.
+        columnStyles: (hasOfferContribution
+            ? {
+                0: { halign: 'left', cellWidth: contentWidth * 0.16 },
+                1: { halign: 'center', cellWidth: contentWidth * 0.07 },
+                2: { halign: 'right', cellWidth: contentWidth * 0.13 },
+                3: { halign: 'right', cellWidth: contentWidth * 0.11 },
+                4: { halign: 'right', cellWidth: contentWidth * 0.13 },
+                5: { halign: 'right', cellWidth: contentWidth * 0.13 },
+                6: { halign: 'right', cellWidth: contentWidth * 0.13 },
+                7: { halign: 'right', cellWidth: contentWidth * 0.14 },
+            }
+            : {
+                0: { halign: 'left', cellWidth: contentWidth * 0.17 },
+                1: { halign: 'center', cellWidth: contentWidth * 0.08 },
+                2: { halign: 'right', cellWidth: contentWidth * 0.14 },
+                3: { halign: 'right', cellWidth: contentWidth * 0.12 },
+                4: { halign: 'right', cellWidth: contentWidth * 0.15 },
+                5: { halign: 'right', cellWidth: contentWidth * 0.16 },
+                6: { halign: 'right', cellWidth: contentWidth * 0.18 },
+            }) as any,
         didParseCell: (hookData: any) => {
             if (hookData.section === 'body' && hookData.row.index === totalRowIndex) {
                 hookData.cell.styles.fillColor = lightGreen;
@@ -385,6 +408,10 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
 
     drawBoxWithHeader(doc, margin, section5StartY, leftBoxW, payoutBoxH, 'PAYOUT SUMMARY');
 
+    // Not a supply by Delito — it is money the restaurant contributed to its own
+    // customers' discount — so it belongs in the payout box and nowhere near the GST one.
+    const offerShare = Number(mt.offerContribution) || 0;
+
     let py = section5StartY + 14;
     doc.setTextColor(...black);
     doc.setFontSize(6.5);
@@ -405,6 +432,17 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
     doc.text(`\u20B9${fmtC(mt.gstOnCommission)}`, margin + leftBoxW - pad, py, { align: 'right' });
     doc.setTextColor(...black);
     py += 5;
+
+    // The vendor's own share of Delito offers. Without this line the box listed three
+    // deductions that did not reach the net payout printed underneath it — the most-read
+    // number on the document with an unexplained hole in it.
+    if (offerShare > 0) {
+        doc.text('(\u2212) Your share of Delito offers:', margin + pad, py);
+        doc.setTextColor(200, 50, 50);
+        doc.text(`\u20B9${fmtC(offerShare)}`, margin + leftBoxW - pad, py, { align: 'right' });
+        doc.setTextColor(...black);
+        py += 5;
+    }
 
     // Separator line
     doc.setDrawColor(...medGreen);
@@ -477,9 +515,12 @@ export function generateCommissionInvoicePDF(data: CommissionInvoiceData): Uint8
     // ═══════════════════════════════════════════════════
     // === 6. COMMISSION AMOUNT IN WORDS ===
     // ═══════════════════════════════════════════════════
-    const totalDeduction = mt.totalDeduction;
-    const wholeAmount = Math.floor(totalDeduction);
-    const paiseAmount = Math.round((totalDeduction - wholeAmount) * 100);
+    // The COMMISSION due, not the total held back. `totalDeduction` also contains the
+    // vendor's own offer share, which Delito never charged them — putting it here wrote
+    // an amount in words on a GST document that was higher than the liability.
+    const commissionDue = Number(mt.commissionPlusGst ?? (mt.commission + mt.gstOnCommission));
+    const wholeAmount = Math.floor(commissionDue);
+    const paiseAmount = Math.round((commissionDue - wholeAmount) * 100);
     const amountWords = `${numberToWords(wholeAmount)} Rupees and ${paiseAmount > 0 ? numberToWords(paiseAmount) : 'Zero'} Paise Only`;
     const wordLines = doc.splitTextToSize(amountWords, contentWidth - pad * 2);
 

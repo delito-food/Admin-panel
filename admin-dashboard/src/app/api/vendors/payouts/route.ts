@@ -63,6 +63,9 @@ async function handleGET(request: NextRequest) {
             smallOrderFees: number;
             deliveryFeeProfit: number;
             totalPlatformEarning: number;
+            /** The vendor's own share of co-funded offers. Already inside netPayable. */
+            offerContribution: number;
+            offerOrders: number;
             netPayable: number;
             paidAmount: number;
             pendingAmount: number;
@@ -85,6 +88,8 @@ async function handleGET(request: NextRequest) {
                     smallOrderFees: 0,
                     deliveryFeeProfit: 0,
                     totalPlatformEarning: 0,
+                    offerContribution: 0,
+                    offerOrders: 0,
                     netPayable: 0,
                     paidAmount: 0,
                     pendingAmount: 0,
@@ -119,12 +124,19 @@ async function handleGET(request: NextRequest) {
             // Total platform earning
             const totalPlatformEarning = commission + gstOnCommission + smallOrderFee + deliveryFeeProfit;
 
-            // Vendor earns: use stored value only if explicitly present and non-null
-            // Avoid `> 0` check — stored 0 would incorrectly bypass calculation
+            // Vendor earns: the stored figure whenever the field EXISTS.
+            //
+            // This used to fall back to a recomputation when the stored value was 0 or
+            // less. That recomputation knows nothing about a co-funded offer — the
+            // vendor's share of it is taken off by functions/orderFinance.js — so on an
+            // offer order it would have overpaid the vendor. A stored 0 is also a real
+            // answer (a fully discounted order), not a missing one.
+            // See CO_FUNDED_OFFERS_IMPLEMENTATION_PLAN.md §3 H5.
             const storedVendorEarning = order.vendorEarning;
-            const vendorEarning = (storedVendorEarning != null && storedVendorEarning !== undefined && (storedVendorEarning as number) > 0)
-                ? (storedVendorEarning as number)
+            const vendorEarning = (storedVendorEarning != null && Number.isFinite(storedVendorEarning as number))
+                ? Math.max(0, storedVendorEarning as number)
                 : Math.max(0, itemTotal - commission - gstOnCommission);
+            const offerContribution = Math.max(0, (order.campaignVendorFunded as number) || 0);
 
             vendorPayouts[vendorId].totalRevenue += itemTotal;
             vendorPayouts[vendorId].commissionAmount += commission;
@@ -132,6 +144,12 @@ async function handleGET(request: NextRequest) {
             vendorPayouts[vendorId].smallOrderFees += smallOrderFee;
             vendorPayouts[vendorId].deliveryFeeProfit += deliveryFeeProfit;
             vendorPayouts[vendorId].totalPlatformEarning += totalPlatformEarning;
+            vendorPayouts[vendorId].offerContribution += offerContribution;
+            // Counts orders the vendor ACTUALLY co-funded. An order where the whole
+            // discount fell to Delito (an anomaly, or a customer past the campaign's
+            // limit) carries campaignDiscount > 0 but costs the vendor nothing, and
+            // counting it made "your share on N orders" read higher than the truth.
+            if (offerContribution > 0) vendorPayouts[vendorId].offerOrders += 1;
             vendorPayouts[vendorId].netPayable += vendorEarning;
             vendorPayouts[vendorId].orderCount += 1;
 
@@ -223,13 +241,18 @@ async function handleGET(request: NextRequest) {
                 totalRevenue: 0, commissionAmount: 0, gstOnCommission: 0,
                 smallOrderFees: 0, deliveryFeeProfit: 0, totalPlatformEarning: 0,
                 netPayable: 0, paidAmount: 0, pendingAmount: 0,
+                // Present here too: a vendor with an issued payout but no delivered orders
+                // in the window still reaches the spread below, and these came back
+                // undefined rather than 0.
+                offerContribution: 0, offerOrders: 0,
                 orderCount: 0, lastOrderDate: null,
             };
 
             // ── Reconciliation ──
             //
             // One source of truth, in a defined order of preference:
-            //   1. the append-only ledger, when this vendor has rows;
+            //   1. the append-only ledger, when it actually accounts for this
+            //      vendor's delivered orders (see the test below);
             //   2. otherwise the order-derived figures computed above.
             //
             // The denormalised counters on the vendor document are never a value
@@ -244,14 +267,71 @@ async function handleGET(request: NextRequest) {
             const vendorDocNet = r2(((data.totalEarnings as number) || 0) - ((data.totalCommission as number) || 0));
 
             const derivedNet = r2(payout.netPayable);
-            const source: 'ledger' | 'orders' = ledger && ledger.entryCount > 0 ? 'ledger' : 'orders';
+
+            // ── When the ledger may be believed ──
+            //
+            // Having rows is not the same as being a record of what a vendor is
+            // owed. Confirming a payout posts a PAYOUT row by itself (see
+            // app/api/payouts/route.ts), but nothing in the running system ever
+            // posts EARNING or COMMISSION rows — only scripts/backfill-ledger.js
+            // does, and only for the history that existed when it was last run.
+            //
+            // So a vendor can hold a ledger of payouts and nothing else. Its
+            // balance is then exactly minus what has been paid, and
+            // `balance + paidOut` comes to 0: the screen reported ₹0 payable,
+            // ₹0 pending, and the vendor dropped out of the pending list
+            // entirely while real money was still owed to them. The same thing
+            // happens in smaller degree whenever the backfill is behind the
+            // orders.
+            //
+            // The test is therefore whether the ledger carries earnings at all,
+            // and then whether those earnings can account for the delivered
+            // orders. A ledger that says a vendor earned less than their own
+            // delivered orders do is missing rows, and the missing rows are
+            // money. In both cases the order-derived figures take over and the
+            // gap is named in `discrepancies` rather than silently applied.
+            const ledgerHasEarnings = !!ledger && ledger.earnings > 0;
+            const ledgerRows = ledger?.entryCount || 0;
+            let source: 'ledger' | 'orders' = ledgerRows > 0 && ledgerHasEarnings ? 'ledger' : 'orders';
+            let ledgerIncomplete = ledgerRows > 0 && !ledgerHasEarnings;
 
             if (source === 'ledger') {
                 // balance = earnings − commission − credit notes − payouts
-                payout.paidAmount = r2(ledger.paidOut);
-                payout.netPayable = r2(ledger.balance + ledger.paidOut);
+                //
+                // MINUS ANY CO-FUNDING SHARE THE LEDGER DOES NOT ALREADY CARRY.
+                //
+                // The ledger's EARNING rows are the order's full itemTotal and its
+                // COMMISSION rows are commission + GST. Neither knows about
+                // campaignVendorFunded: the only writer of those rows
+                // (scripts/backfill-ledger.js) predates co-funded offers. Left alone, the
+                // ledger hands every vendor their own promo share back on top of their
+                // earnings, so Delito ends up funding the whole discount on every
+                // campaign order — the order-derived figure already nets it off, which is
+                // exactly why the two disagree by that amount.
+                //
+                // Subtracting only the REMAINDER keeps this correct while the ledger
+                // catches up: once the backfill has written OFFER_SHARE rows they are
+                // already inside `balance`, and this term goes to zero on its own.
+                const shareInLedger = r2(ledger.offerShare || 0);
+                const shareOutstanding = Math.max(0, r2((payout.offerContribution || 0) - shareInLedger));
+                const ledgerPaid = r2(ledger.paidOut);
+                const ledgerNet = r2(ledger.balance + ledger.paidOut - shareOutstanding);
+
+                if (r2(derivedNet - ledgerNet) >= 0.01) {
+                    // The ledger is behind the orders. Reporting its figure would
+                    // hide money that is owed, so the orders are used and the
+                    // shortfall is reported. Paid still takes the larger of the
+                    // two records, because overstating what has been paid can
+                    // only delay a payout, while understating it pays twice.
+                    ledgerIncomplete = true;
+                    source = 'orders';
+                    payout.paidAmount = Math.max(ledgerPaid, payoutsCollectionPaid);
+                } else {
+                    payout.paidAmount = ledgerPaid;
+                    payout.netPayable = ledgerNet;
+                }
             } else {
-                payout.paidAmount = payoutsCollectionPaid;
+                payout.paidAmount = Math.max(r2(ledger?.paidOut || 0), payoutsCollectionPaid);
             }
             payout.pendingAmount = r2(Math.max(0, payout.netPayable - payout.paidAmount));
 
@@ -264,6 +344,11 @@ async function handleGET(request: NextRequest) {
             if (!paidVsVendorDoc.agrees) discrepancies.push(`paid differs from the vendor record by ₹${paidVsVendorDoc.gap.toFixed(2)}`);
             if (vendorDocNet > 0 && !netVsVendorDoc.agrees) discrepancies.push(`payable differs from the vendor record by ₹${netVsVendorDoc.gap.toFixed(2)}`);
             if (source === 'ledger' && !netVsDerived.agrees) discrepancies.push(`ledger payable differs from the order-derived figure by ₹${netVsDerived.gap.toFixed(2)}`);
+            if (ledgerIncomplete) discrepancies.push(
+                ledgerHasEarnings
+                    ? `the ledger is behind this vendor's delivered orders — payable taken from the orders; re-run scripts/backfill-ledger.js`
+                    : `the ledger holds ${ledgerRows} row(s) but no earnings for this vendor — payable taken from the orders; re-run scripts/backfill-ledger.js`
+            );
 
             return {
                 vendorId: data.id,
@@ -280,6 +365,8 @@ async function handleGET(request: NextRequest) {
                 /** Empty when every record agrees. Each string names a gap to investigate. */
                 discrepancies,
                 ledgerEntryCount: ledger?.entryCount || 0,
+                /** True when this vendor has ledger rows that do not account for their orders. */
+                ledgerIncomplete,
                 bankDetails: data.bankDetails || (data.bankAccountNumber ? {
                     accountNumber: data.bankAccountNumber,
                     ifsc: data.bankIfscCode || data.ifscCode || '',

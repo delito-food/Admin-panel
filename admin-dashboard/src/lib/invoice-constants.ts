@@ -130,6 +130,12 @@ export interface CommissionInvoiceData {
         commissionBase?: number;
         commission: number;
         gstOnCommission: number;
+        /** The taxable supply: commission + its GST. Never includes the offer share. */
+        commissionPlusGst?: number;
+        /** The restaurant's own share of Delito co-funded offers. Not a taxable supply. */
+        offerContribution?: number;
+        offerOrders?: number;
+        /** Everything held back from the payout: commissionPlusGst + offerContribution. */
         totalDeduction: number;
         netPayout: number;
     }>;
@@ -139,6 +145,9 @@ export interface CommissionInvoiceData {
         commissionBase?: number;
         commission: number;
         gstOnCommission: number;
+        commissionPlusGst?: number;
+        offerContribution?: number;
+        offerOrders?: number;
         totalDeduction: number;
         netPayout: number;
     };

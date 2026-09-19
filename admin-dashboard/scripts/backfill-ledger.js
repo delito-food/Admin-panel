@@ -7,7 +7,7 @@
  * Posts, per vendor:
  *   EARNING     + the item total of every delivered order
  *   COMMISSION  − the commission and its GST actually withheld on that order
- *   PAYOUT      − every completed payout record
+ *   PAYOUT      − every payout record already paid out (completed or processed)
  *
  * so that balance = earnings − commission − payouts = what the vendor is owed.
  *
@@ -55,6 +55,21 @@ function ledgerEntryId(partyType, partyId, entryType, sourceId) {
     return `${partyType}_${partyId}_${entryType}_${sourceId}`.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
 
+/**
+ * What the customer paid for food, delivery excluded.
+ *
+ * Mirrors the fallback chain in app/api/vendors/payouts/route.ts. The last link
+ * matters: plenty of orders carry only `total`, and without it they were valued
+ * at 0 here, so no EARNING row was written for them. The vendor was then left
+ * holding a ledger of payouts and nothing else — a balance of exactly minus
+ * what had been paid — and the payouts screen, which trusts the ledger, showed
+ * ₹0 pending and dropped them off the list.
+ */
+function itemTotalOf(order) {
+    return num(order.itemTotal) || num(order.subtotal) ||
+        Math.max(0, num(order.total) - num(order.deliveryFee));
+}
+
 /** Mirrors lib/pricing-engine.ts computeCommission, COMMISSION_BASE = 'original'. */
 function commissionFor(order, ratePercent) {
     const stored = num(order.vendorPlatformCut);
@@ -64,7 +79,7 @@ function commissionFor(order, ratePercent) {
             : r2(stored * 0.18);
         return { amount: r2(stored), gst };
     }
-    const base = num(order.originalItemTotal) || num(order.itemTotal) || num(order.subtotal);
+    const base = num(order.originalItemTotal) || itemTotalOf(order);
     const amount = r2((base * ratePercent) / 100);
     return { amount, gst: r2(amount * 0.18) };
 }
@@ -72,6 +87,17 @@ function commissionFor(order, ratePercent) {
 function isBillable(status) {
     const s = String(status || '').toLowerCase();
     return s === 'delivered' || s === 'completed';
+}
+
+/**
+ * A payout that has left the building. The payouts screen counts both of these
+ * towards what a vendor has been paid, so the ledger has to as well — counting
+ * only 'completed' left older 'processed' transfers out of the ledger, and the
+ * two records then disagreed about how much a vendor had already received.
+ */
+function isPaidOut(status) {
+    const s = String(status || '').toLowerCase();
+    return s === 'completed' || s === 'processed';
 }
 
 function toIso(v) {
@@ -104,7 +130,7 @@ function toIso(v) {
         if (!vendorId || !isBillable(o.status)) return;
         billable++;
 
-        const itemTotal = num(o.itemTotal) || num(o.subtotal);
+        const itemTotal = itemTotalOf(o);
         const occurredAt = toIso(o.deliveredAt || o.createdAt);
         const c = commissionFor(o, rateByVendor[vendorId] || defaultRate);
 
@@ -133,6 +159,24 @@ function toIso(v) {
                 },
             });
         }
+
+        // The vendor's share of a co-funded offer. Its own row, not folded into EARNING,
+        // so the ledger says out loud why the vendor is owed less than their food sales —
+        // and so the balance matches what the commission invoice and the payouts page
+        // compute from the orders themselves. Without it the ledger pays the share back.
+        const offerShare = r2(num(o.campaignVendorFunded));
+        if (offerShare > 0) {
+            rows.push({
+                id: ledgerEntryId('vendor', vendorId, 'OFFER_SHARE', doc.id),
+                data: {
+                    partyType: 'vendor', partyId: vendorId, entryType: 'OFFER_SHARE',
+                    amount: -offerShare, currency: 'INR',
+                    sourceType: 'order', sourceId: doc.id,
+                    description: `Your share of the Delito offer on order ${doc.id}`,
+                    occurredAt, createdAt: new Date().toISOString(), createdBy: 'backfill',
+                },
+            });
+        }
     });
     console.log(`orders: ${orderSnap.size} (${billable} delivered/completed)`);
 
@@ -141,7 +185,7 @@ function toIso(v) {
     let completed = 0;
     payoutSnap.docs.forEach((doc) => {
         const p = doc.data();
-        if (String(p.status || '').toLowerCase() !== 'completed') return;
+        if (!isPaidOut(p.status)) return;
         const vendorId = p.vendorId || p.recipientId;
         const amount = num(p.amount);
         if (!vendorId || amount <= 0) return;
@@ -186,7 +230,7 @@ function toIso(v) {
     let dpCompleted = 0;
     dpPayoutSnap.docs.forEach((doc) => {
         const p = doc.data();
-        if (String(p.status || '').toLowerCase() !== 'completed') return;
+        if (!isPaidOut(p.status)) return;
         const dpId = p.deliveryPersonId || p.recipientId;
         const amount = num(p.amount);
         if (!dpId || amount <= 0) return;
