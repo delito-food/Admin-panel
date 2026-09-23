@@ -127,6 +127,31 @@ export const db = {
         return firestore.batch();
     },
     /**
+     * Fetch a known set of documents in one round trip.
+     *
+     * Billed per document returned, so when the ids are already known this is
+     * dramatically cheaper than downloading the collection and filtering it —
+     * the difference between 30 reads and 1,000 on a delta refresh.
+     */
+    getAll: async (
+        refs: FirebaseFirestore.DocumentReference[]
+    ): Promise<FirebaseFirestore.DocumentSnapshot[]> => {
+        if (refs.length === 0) return [];
+        const firestore = getDb();
+        if (!firestore) {
+            throw new Error('Firebase not initialized. Please set environment variables.');
+        }
+        // getAll takes a variadic list; chunk so a large id set can't blow the
+        // request size limit.
+        const CHUNK = 300;
+        const out: FirebaseFirestore.DocumentSnapshot[] = [];
+        for (let i = 0; i < refs.length; i += CHUNK) {
+            const chunk = refs.slice(i, i + CHUNK);
+            out.push(...(await firestore.getAll(...chunk)));
+        }
+        return out;
+    },
+    /**
      * Run a Firestore transaction.
      *
      * Needed anywhere a read-then-write must be atomic — notably allocating
@@ -303,15 +328,78 @@ export async function sendBulkPushNotification(
 }
 
 // ── Server-side in-memory cache ──
+//
 // Prevents repeated Firestore reads when multiple API routes or polling
 // requests hit the same collections within a short window.
+//
+// Three properties matter here, and the original cache only had the first:
+//
+//   1. A TTL, so the same collection isn't re-read on every request.
+//   2. Single-flight. Without it, N requests that all miss at the same moment
+//      each issue their own full-collection read — which is exactly what
+//      happens when a page mounts and fires four API calls at once, or when
+//      a poll lands while a manual refresh is already running. With it, the
+//      first read is shared and the rest either join it or serve the last
+//      known value.
+//   3. TTLs that match how fast each collection actually changes. `orders`
+//      turns over constantly; `categories` changes when someone edits a menu.
+//      One 60-second number for both meant the slow collections were re-read
+//      hundreds of times a day for nothing.
+//
+// Deliberately NOT done: refreshing a stale entry in the background and
+// returning immediately. On a serverless host the function can be frozen the
+// moment the response is sent, so that read would be paid for and thrown away
+// without ever populating the cache. Stale data is only served here when a
+// refresh someone else is already awaiting is in flight, or when Firestore is
+// unreachable — in both cases the read is guaranteed to be consumed.
 interface CacheEntry<T> {
     data: T;
     expiry: number;
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
+
+/** In-progress reads, keyed the same way as `cache`. See single-flight above. */
+const inflight = new Map<string, Promise<unknown>>();
+
 const DEFAULT_CACHE_TTL = 60_000; // 60 seconds
+
+/**
+ * How long each collection's contents stay fresh.
+ *
+ * Tuned to how quickly the data actually moves, not to a single global guess.
+ * Anything not listed falls back to DEFAULT_CACHE_TTL.
+ *
+ * Note that every route that writes to a collection calls `invalidateCache()`
+ * for it, so a longer TTL here does not mean an admin action takes that long
+ * to show up — it means untouched data isn't re-read for no reason.
+ */
+const COLLECTION_TTL: Record<string, number> = {
+    // Moves constantly — keep it short.
+    orders: 30_000,
+    deliveryTasks: 30_000,
+    notifications: 30_000,
+    pendingDeliveryRequests: 30_000,
+
+    // Changes when an admin or a partner acts; writes invalidate explicitly.
+    vendors: 120_000,
+    deliveryPersons: 120_000,
+    specialOffers: 120_000,
+
+    // Effectively reference data for the lifetime of a page session.
+    customers: 300_000,
+    menuItems: 300_000,
+    invoices: 300_000,
+    wallets: 300_000,
+    pushNotifications: 300_000,
+    deliveryHistory: 300_000,
+    categories: 600_000,
+};
+
+/** The freshness window for a collection, used when a caller doesn't specify one. */
+export function collectionTtl(collectionName: string): number {
+    return COLLECTION_TTL[collectionName] ?? DEFAULT_CACHE_TTL;
+}
 
 // ── Fail fast when Firestore is unreachable ──
 //
@@ -398,7 +486,8 @@ function tripBreaker(collectionName: string, err: unknown): void {
 }
 
 /**
- * The shared read path: fresh cache → live read → stale cache → throw.
+ * The shared read path:
+ *   fresh cache → join an in-flight read → live read → stale cache → throw.
  */
 async function readThroughCache<T>(
     cacheKey: string,
@@ -418,10 +507,34 @@ async function readThroughCache<T>(
         );
     }
 
+    // ── Single-flight ──
+    // Someone is already reading this. Serve the previous value if we have one
+    // (a few seconds of staleness beats a second identical full-collection
+    // read), otherwise wait for theirs rather than starting our own.
+    const pending = inflight.get(cacheKey) as Promise<T> | undefined;
+    if (pending) {
+        if (cached) return cached.data;
+        try {
+            return await pending;
+        } catch (err) {
+            if (cached) return (cached as CacheEntry<T>).data;
+            throw err;
+        }
+    }
+
+    const work = withFirestoreTimeout(read(), collectionName)
+        .then((data) => {
+            cache.set(cacheKey, { data, expiry: Date.now() + ttl });
+            return data;
+        })
+        .finally(() => {
+            inflight.delete(cacheKey);
+        });
+
+    inflight.set(cacheKey, work as Promise<unknown>);
+
     try {
-        const data = await withFirestoreTimeout(read(), collectionName);
-        cache.set(cacheKey, { data, expiry: Date.now() + ttl });
-        return data;
+        return await work;
     } catch (err) {
         tripBreaker(collectionName, err);
         if (cached && isConnectionFailure(err)) {
@@ -438,9 +551,9 @@ async function readThroughCache<T>(
  */
 export async function cachedCollectionGet(
     collectionName: string,
-    ttl: number = DEFAULT_CACHE_TTL
+    ttl?: number
 ): Promise<FirebaseFirestore.QuerySnapshot> {
-    return readThroughCache(`col:${collectionName}`, collectionName, ttl, () =>
+    return readThroughCache(`col:${collectionName}`, collectionName, ttl ?? collectionTtl(collectionName), () =>
         db.collection(collectionName).get()
     );
 }
@@ -451,21 +564,111 @@ export async function cachedCollectionGet(
  */
 export async function cachedCollection(
     collectionName: string,
-    ttl: number = DEFAULT_CACHE_TTL
+    ttl?: number
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<Array<{ id: string; [key: string]: any }>> {
-    return readThroughCache(`col_data:${collectionName}`, collectionName, ttl, async () => {
-        const snapshot = await db.collection(collectionName).get();
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    });
+    return readThroughCache(
+        `col_data:${collectionName}`,
+        collectionName,
+        ttl ?? collectionTtl(collectionName),
+        async () => {
+            const snapshot = await db.collection(collectionName).get();
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+    );
+}
+
+/**
+ * Cache anything derived from Firestore under a caller-chosen key.
+ *
+ * Use this for a computed payload that is expensive to rebuild even when the
+ * underlying collections are already cached — the dashboard summary, for
+ * instance, walks every order to accumulate four periods of earnings. Caching
+ * the *answer* means a page revisit costs nothing at all rather than a fresh
+ * pass over the whole register.
+ *
+ * Keys live in their own namespace, so `invalidateCache('orders')` leaves them
+ * alone; give derived entries a TTL no longer than the data they are built
+ * from, and they will never be more stale than that data would have been.
+ */
+export async function cachedQuery<T>(
+    key: string,
+    read: () => Promise<T>,
+    ttl: number = DEFAULT_CACHE_TTL
+): Promise<T> {
+    return readThroughCache(`derived:${key}`, key, ttl, read);
+}
+
+/**
+ * A cached `count()` aggregation.
+ *
+ * Firestore bills an aggregation at roughly one read per 1,000 index entries
+ * scanned, so counting a collection this way costs a fraction of downloading
+ * it. Prefer this over pulling a whole collection just to call `.length` or
+ * `.filter(...).length` on it.
+ */
+export async function cachedCount(
+    collectionName: string,
+    filters: Array<{
+        field: string;
+        operator: FirebaseFirestore.WhereFilterOp;
+        value: unknown;
+    }> = [],
+    ttl?: number
+): Promise<number> {
+    const signature = filters
+        .map(f => `${f.field}${f.operator}${JSON.stringify(f.value ?? null)}`)
+        .join('|');
+
+    return readThroughCache(
+        `count:${collectionName}:${signature}`,
+        collectionName,
+        ttl ?? collectionTtl(collectionName),
+        async () => {
+            let query: FirebaseFirestore.Query = db.collection(collectionName);
+            for (const f of filters) {
+                query = query.where(f.field, f.operator, f.value);
+            }
+            const snapshot = await query.count().get();
+            return snapshot.data().count;
+        }
+    );
 }
 
 /**
  * Invalidate cache for a specific collection (call after writes).
+ *
+ * Clears the collection's document cache and every count derived from it, so a
+ * write is visible on the next read rather than at the end of the TTL.
  */
 export function invalidateCache(collectionName: string): void {
-    cache.delete(`col:${collectionName}`);
-    cache.delete(`col_data:${collectionName}`);
+    const exact = [`col:${collectionName}`, `col_data:${collectionName}`];
+    for (const key of exact) {
+        cache.delete(key);
+        inflight.delete(key);
+    }
+
+    const countPrefix = `count:${collectionName}:`;
+    for (const key of Array.from(cache.keys())) {
+        if (key.startsWith(countPrefix)) cache.delete(key);
+    }
+    for (const key of Array.from(inflight.keys())) {
+        if (key.startsWith(countPrefix)) inflight.delete(key);
+    }
+}
+
+/**
+ * Invalidate cache for a collection and any derived payloads built from it.
+ *
+ * `derivedKeys` are the `cachedQuery` keys that read this collection — pass
+ * them so a write doesn't leave a summary showing the old numbers.
+ */
+export function invalidateCacheWithDerived(collectionName: string, derivedKeys: string[] = []): void {
+    invalidateCache(collectionName);
+    for (const key of derivedKeys) {
+        cache.delete(`derived:${key}`);
+        inflight.delete(`derived:${key}`);
+    }
 }
 
 /**
@@ -473,6 +676,7 @@ export function invalidateCache(collectionName: string): void {
  */
 export function invalidateAllCache(): void {
     cache.clear();
+    inflight.clear();
 }
 
 // Helper functions for Firestore operations

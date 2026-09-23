@@ -1,8 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api-client';
 
 interface UseApiOptions {
     autoFetch?: boolean;
+    /**
+     * Refresh every N milliseconds. Polling is suspended while the tab is in
+     * the background and resumes — with an immediate refresh — when it comes
+     * back, so a dashboard left open on a second monitor overnight doesn't
+     * spend the night querying Firestore.
+     */
+    pollMs?: number;
+    /**
+     * How long a cached response is served without a network call at all.
+     * Past this, the cached value is still shown immediately while a refresh
+     * runs behind it.
+     */
+    freshMs?: number;
 }
 
 interface UseApiResult<T> {
@@ -10,50 +23,205 @@ interface UseApiResult<T> {
     loading: boolean;
     error: string | null;
     refetch: () => Promise<void>;
+    /** Replace the cached value locally — used to merge a delta refresh. */
+    mutate: (next: T) => void;
+}
+
+// ── Shared client-side response cache ──
+//
+// Every page in the panel mounted its own `useApi` and started from nothing,
+// so moving from Orders to Vendors and back meant two more full round trips
+// and two more spinners, even though the data had been on screen seconds
+// earlier. The cache below is module-scoped, so it survives navigation for as
+// long as the tab is open.
+//
+// Three things come out of that:
+//   • Revisiting a page paints instantly from cache, then quietly refreshes.
+//   • Two components asking for the same endpoint at the same time share one
+//     request instead of racing (see `inflight`).
+//   • The server sees far fewer requests, and each one it does see is more
+//     likely to hit its own cache.
+//
+// This is a per-tab memory cache and nothing more: a reload clears it, and it
+// is never the source of truth for anything written back.
+
+interface ClientCacheEntry {
+    data: unknown;
+    fetchedAt: number;
+}
+
+const responseCache = new Map<string, ClientCacheEntry>();
+const inflight = new Map<string, Promise<unknown>>();
+
+/**
+ * Cap on distinct cached endpoints.
+ *
+ * Report pages build their URL from the selected filters, so a long session
+ * spent exploring date ranges would otherwise accumulate an entry per
+ * combination. Oldest-first eviction keeps the working set — the pages
+ * someone actually moves between — and drops the one-off queries.
+ */
+const MAX_CACHE_ENTRIES = 40;
+
+function rememberResponse(endpoint: string, data: unknown): void {
+    responseCache.delete(endpoint);
+    responseCache.set(endpoint, { data, fetchedAt: Date.now() });
+    while (responseCache.size > MAX_CACHE_ENTRIES) {
+        const oldest = responseCache.keys().next().value;
+        if (oldest === undefined) break;
+        responseCache.delete(oldest);
+    }
+}
+
+/** Default window during which a cached response is used as-is. */
+const DEFAULT_FRESH_MS = 20_000;
+
+class ApiError extends Error {}
+
+async function fetchEndpoint<T>(endpoint: string): Promise<T> {
+    const existing = inflight.get(endpoint) as Promise<T> | undefined;
+    if (existing) return existing;
+
+    const work = (async (): Promise<T> => {
+        const response = await authenticatedFetch(endpoint);
+
+        if (response.status === 401) {
+            throw new ApiError('Session expired. Please log in again.');
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new ApiError(result.error || 'Failed to fetch data');
+        }
+
+        rememberResponse(endpoint, result.data);
+        return result.data as T;
+    })().finally(() => {
+        inflight.delete(endpoint);
+    });
+
+    inflight.set(endpoint, work as Promise<unknown>);
+    return work;
+}
+
+/** Drop a cached endpoint so the next read goes to the server. */
+export function invalidateApiCache(endpoint?: string): void {
+    if (endpoint) responseCache.delete(endpoint);
+    else responseCache.clear();
 }
 
 export function useApi<T>(
     endpoint: string,
-    options: UseApiOptions = { autoFetch: true }
+    options: UseApiOptions = {}
 ): UseApiResult<T> {
-    const [data, setData] = useState<T | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { autoFetch = true, pollMs, freshMs = DEFAULT_FRESH_MS } = options;
+
+    const cached = responseCache.get(endpoint);
+    const [data, setData] = useState<T | null>((cached?.data as T) ?? null);
+    // Only show a spinner when there is genuinely nothing to show.
+    const [loading, setLoading] = useState(autoFetch && !cached);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchData = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            const response = await authenticatedFetch(endpoint);
+    // Guards against writing state after the component has gone, and against a
+    // slow response for endpoint A landing after the caller switched to B.
+    const mountedRef = useRef(true);
+    const endpointRef = useRef(endpoint);
+    endpointRef.current = endpoint;
 
-            if (response.status === 401) {
-                setError('Session expired. Please log in again.');
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
+
+    const load = useCallback(async (opts: { force?: boolean } = {}) => {
+        const entry = responseCache.get(endpoint);
+
+        if (entry) {
+            // Paint what we already have before doing anything else.
+            if (mountedRef.current && endpointRef.current === endpoint) {
+                setData(entry.data as T);
                 setLoading(false);
-                return;
             }
-
-            const result = await response.json();
-
-            if (result.success) {
-                setData(result.data);
-            } else {
-                setError(result.error || 'Failed to fetch data');
-            }
-        } catch (err) {
-            setError('Network error. Please try again.');
-            console.error('API Error:', err);
-        } finally {
-            setLoading(false);
+            if (!opts.force && Date.now() - entry.fetchedAt < freshMs) return;
+        } else if (mountedRef.current) {
+            setLoading(true);
         }
+
+        try {
+            const result = await fetchEndpoint<T>(endpoint);
+            if (!mountedRef.current || endpointRef.current !== endpoint) return;
+            setData(result);
+            setError(null);
+        } catch (err) {
+            if (!mountedRef.current || endpointRef.current !== endpoint) return;
+            if (err instanceof ApiError) {
+                setError(err.message);
+            } else {
+                setError('Network error. Please try again.');
+                console.error('API Error:', err);
+            }
+        } finally {
+            if (mountedRef.current && endpointRef.current === endpoint) {
+                setLoading(false);
+            }
+        }
+    }, [endpoint, freshMs]);
+
+    const refetch = useCallback(() => load({ force: true }), [load]);
+
+    const mutate = useCallback((next: T) => {
+        rememberResponse(endpoint, next);
+        if (mountedRef.current) setData(next);
+    }, [endpoint]);
+
+    // When the endpoint changes — a report page rebuilding its URL from the
+    // selected filters, say — show that endpoint's cached answer straight away
+    // rather than leaving the previous one on screen.
+    useEffect(() => {
+        const entry = responseCache.get(endpoint);
+        setData((entry?.data as T) ?? null);
+        setError(null);
     }, [endpoint]);
 
     useEffect(() => {
-        if (options.autoFetch) {
-            fetchData();
-        }
-    }, [fetchData, options.autoFetch]);
+        if (autoFetch) load();
+    }, [load, autoFetch]);
 
-    return { data, loading, error, refetch: fetchData };
+    // ── Polling, paused while the tab is hidden ──
+    useEffect(() => {
+        if (!pollMs || !autoFetch) return;
+
+        let timer: ReturnType<typeof setInterval> | undefined;
+
+        const start = () => {
+            if (timer) return;
+            timer = setInterval(() => { load({ force: true }); }, pollMs);
+        };
+        const stop = () => {
+            if (timer) clearInterval(timer);
+            timer = undefined;
+        };
+
+        const onVisibility = () => {
+            if (document.hidden) {
+                stop();
+            } else {
+                // Catch up on whatever was missed, then resume the cadence.
+                load({ force: true });
+                start();
+            }
+        };
+
+        if (!document.hidden) start();
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            stop();
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [pollMs, autoFetch, load]);
+
+    return { data, loading, error, refetch, mutate };
 }
 
 // Helper function for PATCH requests

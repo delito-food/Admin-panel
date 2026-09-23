@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db, collections, countDocuments, cachedCollection } from '@/lib/firebase-admin';
+import { collections, countDocuments, cachedCollection, cachedQuery } from '@/lib/firebase-admin';
 import { withAdmin } from '@/lib/api-guard';
 import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds } from '@/lib/fiscal';
 
@@ -143,260 +143,281 @@ function roundAccum(acc: PeriodAccumulator): PeriodAccumulator {
     };
 }
 
+/**
+ * How long a computed dashboard payload is reused.
+ *
+ * The summary walks every completed order four times over (today, week, month,
+ * all time) plus a 30-day trend, so rebuilding it is the expensive part even
+ * when the collections it reads are already cached. Anything shorter than the
+ * orders cache itself would just recompute the same numbers from the same
+ * cached rows; anything much longer would make the panel feel stale.
+ */
+const DASHBOARD_PAYLOAD_TTL = 30_000;
+
+async function buildDashboardPayload() {
+    // Date calculations
+    // All period boundaries in IST. Built with setHours() on a UTC host, the
+    // day started at 05:30 IST, so the morning trade was reported against
+    // the previous day.
+    const now = new Date();
+    const today = istTodayBounds(now).start;
+    // Week starts on the IST Sunday.
+    const istDayOfWeek = new Date(today.getTime() + 5.5 * 3600_000).getUTCDay();
+    const weekStart = istDaysAgoStart(istDayOfWeek, now);
+    const monthStart = istCurrentMonthBounds(now).start;
+
+    // Get ALL data from cached collections — single source of truth.
+    // Each collection carries its own freshness window (see COLLECTION_TTL in
+    // lib/firebase-admin.ts): orders are re-read often, partner and customer
+    // records much less, because they only change when someone acts on them
+    // and every write path invalidates them explicitly.
+    const allOrders = await cachedCollection(collections.orders);
+    const allVendorDocs = await cachedCollection(collections.vendors);
+    const allDeliveryDocs = await cachedCollection(collections.deliveryPersons);
+    const allCustomerDocs = await cachedCollection(collections.customers);
+
+    // Compute counts from cached data (avoids 15 individual Firestore count queries)
+    const totalVendors = allVendorDocs.length;
+    const activeVendors = allVendorDocs.filter(v => v.isVerified === true).length;
+    const onlineVendors = allVendorDocs.filter(v => v.isOnline === true).length;
+    const pendingVendors = allVendorDocs.filter(v => v.isVerified === false).length;
+    const suspendedVendors = allVendorDocs.filter(v => v.isSuspended === true).length;
+
+    const totalDeliveryPersons = allDeliveryDocs.length;
+    const activeDeliveryPersons = allDeliveryDocs.filter(d => d.isVerified === true).length;
+    const onlineDeliveryPersons = allDeliveryDocs.filter(d => d.isOnline === true).length;
+    const pendingDeliveryPersons = allDeliveryDocs.filter(d => d.isVerified === false).length;
+    const suspendedDeliveryPersons = allDeliveryDocs.filter(d => d.isSuspended === true).length;
+
+    const totalCustomers = allCustomerDocs.length;
+    const totalOrders = allOrders.length;
+    const pendingOrders = allOrders.filter(o => o.status === 'Pending').length;
+    const completedOrders = allOrders.filter(o => o.status === 'Delivered' || o.status === 'Completed').length;
+    const cancelledOrders = allOrders.filter(o => o.status === 'Cancelled').length;
+
+    // Accumulators for each period
+    let todayAcc = emptyAccum();
+    let weekAcc = emptyAccum();
+    let monthAcc = emptyAccum();
+    let allTimeAcc = emptyAccum();
+
+    // Daily trends (last 30 days)
+    const dailyTrends: Record<string, { orders: number; gmv: number; netPlatformEarning: number }> = {};
+    for (let i = 0; i < 30; i++) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        dailyTrends[key] = { orders: 0, gmv: 0, netPlatformEarning: 0 };
+    }
+
+    // Vendor & delivery performance tracking
+    const vendorPerformance: Record<string, { orders: number; revenue: number; name: string }> = {};
+    const deliveryPerformance: Record<string, { deliveries: number; name: string }> = {};
+
+    // Helper to safely parse dates
+    function parseDate(value: any): Date | null {
+        if (!value) return null;
+        if (value._seconds !== undefined) return new Date(value._seconds * 1000);
+        if (typeof value.toDate === 'function') return value.toDate();
+        const date = new Date(value);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    // Process all delivered/completed orders
+    allOrders.forEach((order: any) => {
+        const status = (order.status || '').toLowerCase();
+        const isCompleted = status === 'delivered' || status === 'completed';
+        if (!isCompleted) return;
+
+        const orderDate = parseDate(order.createdAt);
+        const breakdown = calcOrderBreakdown(order);
+
+        // All time
+        addToAccum(allTimeAcc, breakdown);
+
+        if (orderDate && !isNaN(orderDate.getTime())) {
+            if (orderDate >= today) addToAccum(todayAcc, breakdown);
+            if (orderDate >= weekStart) addToAccum(weekAcc, breakdown);
+            if (orderDate >= monthStart) addToAccum(monthAcc, breakdown);
+
+            // Daily trends
+            try {
+                const dateKey = orderDate.toISOString().split('T')[0];
+                if (dailyTrends[dateKey]) {
+                    dailyTrends[dateKey].orders += 1;
+                    dailyTrends[dateKey].gmv += breakdown.gmv;
+                    dailyTrends[dateKey].netPlatformEarning += breakdown.netPlatformEarning;
+                }
+            } catch (_) { /* skip */ }
+        }
+
+        // Vendor performance
+        if (order.vendorId) {
+            if (!vendorPerformance[order.vendorId]) {
+                vendorPerformance[order.vendorId] = { orders: 0, revenue: 0, name: order.vendorName || 'Unknown' };
+            }
+            vendorPerformance[order.vendorId].orders += 1;
+            vendorPerformance[order.vendorId].revenue += breakdown.subtotal;
+        }
+
+        // Delivery partner performance
+        if (order.deliveryPartnerId || order.deliveryPersonId) {
+            const partnerId = order.deliveryPartnerId || order.deliveryPersonId;
+            if (!deliveryPerformance[partnerId]) {
+                deliveryPerformance[partnerId] = { deliveries: 0, name: order.deliveryPartnerName || order.deliveryPersonName || 'Unknown' };
+            }
+            deliveryPerformance[partnerId].deliveries += 1;
+        }
+    });
+
+    // Round all accumulators
+    todayAcc = roundAccum(todayAcc);
+    weekAcc = roundAccum(weekAcc);
+    monthAcc = roundAccum(monthAcc);
+    allTimeAcc = roundAccum(allTimeAcc);
+
+    // Average order value (based on subtotal of completed orders)
+    const avgOrderValue = allTimeAcc.orderCount > 0
+        ? Math.round((allTimeAcc.subtotal / allTimeAcc.orderCount) * 100) / 100
+        : 0;
+
+    // Top performers
+    const topVendors = Object.entries(vendorPerformance)
+        .map(([id, data]) => ({ vendorId: id, ...data }))
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5);
+
+    const topDeliveryPartners = Object.entries(deliveryPerformance)
+        .map(([id, data]) => ({ deliveryPartnerId: id, ...data }))
+        .sort((a, b) => b.deliveries - a.deliveries)
+        .slice(0, 5);
+
+    // Revenue trend
+    const revenueTrend = Object.entries(dailyTrends)
+        .map(([date, data]) => ({
+            date,
+            gmv: Math.round(data.gmv * 100) / 100,
+            orders: data.orders,
+            platformEarnings: Math.round(data.netPlatformEarning * 100) / 100,
+            // keep 'revenue' alias for chart backwards-compat
+            revenue: Math.round(data.gmv * 100) / 100,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Customer metrics — reuse the documents already read above rather than
+    // asking for the collection a second time.
+    let newCustomersThisMonth = 0;
+    let activeCustomersThisMonth = 0;
+
+    allCustomerDocs.forEach(data => {
+        const createdAt = parseDate(data.createdAt);
+        const lastOrderAt = parseDate(data.lastOrderAt);
+        if (createdAt && !isNaN(createdAt.getTime()) && createdAt >= monthStart) newCustomersThisMonth++;
+        if (lastOrderAt && !isNaN(lastOrderAt.getTime()) && lastOrderAt >= monthStart) activeCustomersThisMonth++;
+    });
+
+    const retentionRate = totalCustomers > 0
+        ? Math.round((activeCustomersThisMonth / totalCustomers) * 100)
+        : 0;
+
+    const pendingMenuItems = await countDocuments(collections.menuItems, 'isVerified', '==', false);
+
+    const todayOrdersCount = allOrders.filter((o: any) => {
+        const d = parseDate(o.createdAt);
+        return d && !isNaN(d.getTime()) && d >= today;
+    }).length;
+
+    return {
+            // Platform Earnings (all periods) — full breakdown
+            platformEarnings: {
+                today: todayAcc,
+                thisWeek: weekAcc,
+                thisMonth: monthAcc,
+                allTime: allTimeAcc,
+            },
+
+            // Orders Overview
+            ordersOverview: {
+                total: totalOrders,
+                completed: completedOrders,
+                pending: pendingOrders,
+                cancelled: cancelledOrders,
+                avgOrderValue,
+                todayOrders: todayOrdersCount,
+            },
+
+            // Vendor Statistics
+            vendorStats: {
+                total: totalVendors,
+                verified: activeVendors,
+                suspended: suspendedVendors,
+                online: onlineVendors,
+                pending: pendingVendors,
+                topPerformers: topVendors.map(v => ({
+                    id: v.vendorId,
+                    name: v.name,
+                    totalOrders: v.orders,
+                    revenue: v.revenue,
+                    rating: 4.5,
+                })),
+            },
+
+            // Delivery Partner Statistics
+            deliveryStats: {
+                total: totalDeliveryPersons,
+                verified: activeDeliveryPersons,
+                suspended: suspendedDeliveryPersons,
+                online: onlineDeliveryPersons,
+                pending: pendingDeliveryPersons,
+                topPerformers: topDeliveryPartners.map(d => ({
+                    id: d.deliveryPartnerId,
+                    name: d.name,
+                    totalOrders: d.deliveries,
+                    revenue: d.deliveries * 25, // avg partner earning per delivery
+                    rating: 4.5,
+                })),
+            },
+
+            // Customer Metrics
+            customerMetrics: {
+                total: totalCustomers,
+                newThisMonth: newCustomersThisMonth,
+                activeThisMonth: activeCustomersThisMonth,
+                retentionRate,
+            },
+
+            // Revenue Trend (last 30 days)
+            revenueTrend,
+
+            // Verification
+            verification: {
+                pendingVendors,
+                pendingDeliveryPersons,
+                pendingMenuItems,
+                total: pendingVendors + pendingDeliveryPersons + pendingMenuItems,
+            },
+
+            // Legacy stats for backwards compatibility
+            stats: {
+                totalOrders,
+                todayOrders: todayOrdersCount,
+                totalRevenue: allTimeAcc.gmv,
+                todayRevenue: todayAcc.gmv,
+                activeVendors: onlineVendors,
+                activeDelivery: onlineDeliveryPersons,
+                totalCustomers,
+            },
+    };
+}
+
 async function handleGET() {
     try {
-        // Date calculations
-        // All period boundaries in IST. Built with setHours() on a UTC host, the
-        // day started at 05:30 IST, so the morning trade was reported against
-        // the previous day.
-        const now = new Date();
-        const today = istTodayBounds(now).start;
-        // Week starts on the IST Sunday.
-        const istDayOfWeek = new Date(today.getTime() + 5.5 * 3600_000).getUTCDay();
-        const weekStart = istDaysAgoStart(istDayOfWeek, now);
-        const monthStart = istCurrentMonthBounds(now).start;
-
-        // Get ALL data from cached collections (60s TTL) — single source of truth
-        const allOrders = await cachedCollection(collections.orders);
-        const allVendorDocs = await cachedCollection(collections.vendors);
-        const allDeliveryDocs = await cachedCollection(collections.deliveryPersons);
-        const allCustomerDocs = await cachedCollection(collections.customers);
-
-        // Compute counts from cached data (avoids 15 individual Firestore count queries)
-        const totalVendors = allVendorDocs.length;
-        const activeVendors = allVendorDocs.filter(v => v.isVerified === true).length;
-        const onlineVendors = allVendorDocs.filter(v => v.isOnline === true).length;
-        const pendingVendors = allVendorDocs.filter(v => v.isVerified === false).length;
-        const suspendedVendors = allVendorDocs.filter(v => v.isSuspended === true).length;
-
-        const totalDeliveryPersons = allDeliveryDocs.length;
-        const activeDeliveryPersons = allDeliveryDocs.filter(d => d.isVerified === true).length;
-        const onlineDeliveryPersons = allDeliveryDocs.filter(d => d.isOnline === true).length;
-        const pendingDeliveryPersons = allDeliveryDocs.filter(d => d.isVerified === false).length;
-        const suspendedDeliveryPersons = allDeliveryDocs.filter(d => d.isSuspended === true).length;
-
-        const totalCustomers = allCustomerDocs.length;
-        const totalOrders = allOrders.length;
-        const pendingOrders = allOrders.filter(o => o.status === 'Pending').length;
-        const completedOrders = allOrders.filter(o => o.status === 'Delivered' || o.status === 'Completed').length;
-        const cancelledOrders = allOrders.filter(o => o.status === 'Cancelled').length;
-
-        // Accumulators for each period
-        let todayAcc = emptyAccum();
-        let weekAcc = emptyAccum();
-        let monthAcc = emptyAccum();
-        let allTimeAcc = emptyAccum();
-
-        // Daily trends (last 30 days)
-        const dailyTrends: Record<string, { orders: number; gmv: number; netPlatformEarning: number }> = {};
-        for (let i = 0; i < 30; i++) {
-            const d = new Date(now);
-            d.setDate(now.getDate() - i);
-            const key = d.toISOString().split('T')[0];
-            dailyTrends[key] = { orders: 0, gmv: 0, netPlatformEarning: 0 };
-        }
-
-        // Vendor & delivery performance tracking
-        const vendorPerformance: Record<string, { orders: number; revenue: number; name: string }> = {};
-        const deliveryPerformance: Record<string, { deliveries: number; name: string }> = {};
-
-        // Helper to safely parse dates
-        function parseDate(value: any): Date | null {
-            if (!value) return null;
-            if (value._seconds !== undefined) return new Date(value._seconds * 1000);
-            if (typeof value.toDate === 'function') return value.toDate();
-            const date = new Date(value);
-            return isNaN(date.getTime()) ? null : date;
-        }
-
-        // Process all delivered/completed orders
-        allOrders.forEach((order: any) => {
-            const status = (order.status || '').toLowerCase();
-            const isCompleted = status === 'delivered' || status === 'completed';
-            if (!isCompleted) return;
-
-            const orderDate = parseDate(order.createdAt);
-            const breakdown = calcOrderBreakdown(order);
-
-            // All time
-            addToAccum(allTimeAcc, breakdown);
-
-            if (orderDate && !isNaN(orderDate.getTime())) {
-                if (orderDate >= today) addToAccum(todayAcc, breakdown);
-                if (orderDate >= weekStart) addToAccum(weekAcc, breakdown);
-                if (orderDate >= monthStart) addToAccum(monthAcc, breakdown);
-
-                // Daily trends
-                try {
-                    const dateKey = orderDate.toISOString().split('T')[0];
-                    if (dailyTrends[dateKey]) {
-                        dailyTrends[dateKey].orders += 1;
-                        dailyTrends[dateKey].gmv += breakdown.gmv;
-                        dailyTrends[dateKey].netPlatformEarning += breakdown.netPlatformEarning;
-                    }
-                } catch (_) { /* skip */ }
-            }
-
-            // Vendor performance
-            if (order.vendorId) {
-                if (!vendorPerformance[order.vendorId]) {
-                    vendorPerformance[order.vendorId] = { orders: 0, revenue: 0, name: order.vendorName || 'Unknown' };
-                }
-                vendorPerformance[order.vendorId].orders += 1;
-                vendorPerformance[order.vendorId].revenue += breakdown.subtotal;
-            }
-
-            // Delivery partner performance
-            if (order.deliveryPartnerId || order.deliveryPersonId) {
-                const partnerId = order.deliveryPartnerId || order.deliveryPersonId;
-                if (!deliveryPerformance[partnerId]) {
-                    deliveryPerformance[partnerId] = { deliveries: 0, name: order.deliveryPartnerName || order.deliveryPersonName || 'Unknown' };
-                }
-                deliveryPerformance[partnerId].deliveries += 1;
-            }
-        });
-
-        // Round all accumulators
-        todayAcc = roundAccum(todayAcc);
-        weekAcc = roundAccum(weekAcc);
-        monthAcc = roundAccum(monthAcc);
-        allTimeAcc = roundAccum(allTimeAcc);
-
-        // Average order value (based on subtotal of completed orders)
-        const avgOrderValue = allTimeAcc.orderCount > 0
-            ? Math.round((allTimeAcc.subtotal / allTimeAcc.orderCount) * 100) / 100
-            : 0;
-
-        // Top performers
-        const topVendors = Object.entries(vendorPerformance)
-            .map(([id, data]) => ({ vendorId: id, ...data }))
-            .sort((a, b) => b.revenue - a.revenue)
-            .slice(0, 5);
-
-        const topDeliveryPartners = Object.entries(deliveryPerformance)
-            .map(([id, data]) => ({ deliveryPartnerId: id, ...data }))
-            .sort((a, b) => b.deliveries - a.deliveries)
-            .slice(0, 5);
-
-        // Revenue trend
-        const revenueTrend = Object.entries(dailyTrends)
-            .map(([date, data]) => ({
-                date,
-                gmv: Math.round(data.gmv * 100) / 100,
-                orders: data.orders,
-                platformEarnings: Math.round(data.netPlatformEarning * 100) / 100,
-                // keep 'revenue' alias for chart backwards-compat
-                revenue: Math.round(data.gmv * 100) / 100,
-            }))
-            .sort((a, b) => a.date.localeCompare(b.date));
-
-        // Customer metrics (cached)
-        const customerDocs = await cachedCollection(collections.customers);
-        let newCustomersThisMonth = 0;
-        let activeCustomersThisMonth = 0;
-
-        customerDocs.forEach(data => {
-            const createdAt = parseDate(data.createdAt);
-            const lastOrderAt = parseDate(data.lastOrderAt);
-            if (createdAt && !isNaN(createdAt.getTime()) && createdAt >= monthStart) newCustomersThisMonth++;
-            if (lastOrderAt && !isNaN(lastOrderAt.getTime()) && lastOrderAt >= monthStart) activeCustomersThisMonth++;
-        });
-
-        const retentionRate = totalCustomers > 0
-            ? Math.round((activeCustomersThisMonth / totalCustomers) * 100)
-            : 0;
-
-        const pendingMenuItems = await countDocuments(collections.menuItems, 'isVerified', '==', false);
-
-        const todayOrdersCount = allOrders.filter((o: any) => {
-            const d = parseDate(o.createdAt);
-            return d && !isNaN(d.getTime()) && d >= today;
-        }).length;
-
-        return NextResponse.json({
-            success: true,
-            data: {
-                // Platform Earnings (all periods) — full breakdown
-                platformEarnings: {
-                    today: todayAcc,
-                    thisWeek: weekAcc,
-                    thisMonth: monthAcc,
-                    allTime: allTimeAcc,
-                },
-
-                // Orders Overview
-                ordersOverview: {
-                    total: totalOrders,
-                    completed: completedOrders,
-                    pending: pendingOrders,
-                    cancelled: cancelledOrders,
-                    avgOrderValue,
-                    todayOrders: todayOrdersCount,
-                },
-
-                // Vendor Statistics
-                vendorStats: {
-                    total: totalVendors,
-                    verified: activeVendors,
-                    suspended: suspendedVendors,
-                    online: onlineVendors,
-                    pending: pendingVendors,
-                    topPerformers: topVendors.map(v => ({
-                        id: v.vendorId,
-                        name: v.name,
-                        totalOrders: v.orders,
-                        revenue: v.revenue,
-                        rating: 4.5,
-                    })),
-                },
-
-                // Delivery Partner Statistics
-                deliveryStats: {
-                    total: totalDeliveryPersons,
-                    verified: activeDeliveryPersons,
-                    suspended: suspendedDeliveryPersons,
-                    online: onlineDeliveryPersons,
-                    pending: pendingDeliveryPersons,
-                    topPerformers: topDeliveryPartners.map(d => ({
-                        id: d.deliveryPartnerId,
-                        name: d.name,
-                        totalOrders: d.deliveries,
-                        revenue: d.deliveries * 25, // avg partner earning per delivery
-                        rating: 4.5,
-                    })),
-                },
-
-                // Customer Metrics
-                customerMetrics: {
-                    total: totalCustomers,
-                    newThisMonth: newCustomersThisMonth,
-                    activeThisMonth: activeCustomersThisMonth,
-                    retentionRate,
-                },
-
-                // Revenue Trend (last 30 days)
-                revenueTrend,
-
-                // Verification
-                verification: {
-                    pendingVendors,
-                    pendingDeliveryPersons,
-                    pendingMenuItems,
-                    total: pendingVendors + pendingDeliveryPersons + pendingMenuItems,
-                },
-
-                // Legacy stats for backwards compatibility
-                stats: {
-                    totalOrders,
-                    todayOrders: todayOrdersCount,
-                    totalRevenue: allTimeAcc.gmv,
-                    todayRevenue: todayAcc.gmv,
-                    activeVendors: onlineVendors,
-                    activeDelivery: onlineDeliveryPersons,
-                    totalCustomers,
-                },
-            }
-        });
+        const data = await cachedQuery(
+            'dashboard:summary',
+            buildDashboardPayload,
+            DASHBOARD_PAYLOAD_TTL
+        );
+        return NextResponse.json({ success: true, data });
     } catch (error) {
         console.error('Dashboard stats error:', error);
         return NextResponse.json(

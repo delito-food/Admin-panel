@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
@@ -53,10 +53,33 @@ const statusFilters = ['All', 'Pending', 'Accepted', 'Preparing', 'Prepared', 'S
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
+const ORDERS_ENDPOINT = '/api/orders?limit=all';
+
+// ── Keeping the register current ──
+//
+// This page used to re-download every order it had every 90 seconds. On a
+// thousand-order platform that is a thousand document reads plus the vendor,
+// partner, delivery-task and invoice collections joined onto them — several
+// megabytes of JSON — to discover that, typically, one order had moved from
+// Preparing to Delivered. It also got steadily worse as the register grew.
+//
+// Instead: load the full register once, then ask only for orders created in
+// the last day and merge them in. That covers everything that realistically
+// changes — new orders, and status transitions on recent ones — at a cost
+// that stays flat no matter how long the platform has been running.
+//
+// The slow full refresh is the safety net. If anything ever falls outside the
+// delta window — an old order cancelled by hand, an order whose timestamp
+// isn't a Firestore timestamp and so escapes the range query — it is picked up
+// within fifteen minutes rather than never. The Refresh button is immediate.
+const DELTA_POLL_MS = 90_000;
+const FULL_REFRESH_MS = 15 * 60_000;
+const DELTA_WINDOW_MS = 24 * 60 * 60_000;
+
 export default function OrdersPage() {
-    // `limit=all` — the full order register is fetched so that search, filters
-    // and pagination below operate on every order, not just the newest page.
-    const { data: orders, loading, refetch } = useApi<Order[]>('/api/orders?limit=all');
+    // The full order register is fetched once so that search, filters and
+    // pagination below operate on every order, not just the newest page.
+    const { data: orders, loading, refetch, mutate } = useApi<Order[]>(ORDERS_ENDPOINT);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -119,11 +142,80 @@ export default function OrdersPage() {
         setRefreshing(false);
     };
 
-    // Auto-refresh every 90 seconds
+    // Latest orders, readable from inside the polling effect without making
+    // the effect depend on them (which would tear down every timer on every
+    // merge).
+    const ordersRef = useRef<Order[] | null>(orders);
+    ordersRef.current = orders;
+
+    const pullDelta = useCallback(async () => {
+        const current = ordersRef.current;
+        // Nothing to merge into yet — the initial load will cover it.
+        if (!current || current.length === 0) return;
+
+        const since = new Date(Date.now() - DELTA_WINDOW_MS).toISOString();
+
+        try {
+            const res = await authenticatedFetch(
+                `/api/orders?since=${encodeURIComponent(since)}`
+            );
+            if (!res.ok) return;
+
+            const json = await res.json();
+            if (!json?.success || !Array.isArray(json.data) || json.data.length === 0) return;
+
+            const byId = new Map(current.map(o => [o.orderId, o]));
+            for (const order of json.data as Order[]) {
+                byId.set(order.orderId, order);
+            }
+
+            const merged = Array.from(byId.values()).sort((a, b) =>
+                (b.createdAt || '').localeCompare(a.createdAt || '')
+            );
+            mutate(merged);
+        } catch {
+            // A failed refresh leaves the list exactly as it was, which is the
+            // right outcome — the register on screen is still valid, just a
+            // little older.
+        }
+    }, [mutate]);
+
+    // Auto-refresh: a delta every 90 seconds, a full reload every 15 minutes,
+    // both suspended while the tab is in the background.
     useEffect(() => {
-        const interval = setInterval(() => { refetch(); }, 90_000);
-        return () => clearInterval(interval);
-    }, [refetch]);
+        let deltaTimer: ReturnType<typeof setInterval> | undefined;
+        let fullTimer: ReturnType<typeof setInterval> | undefined;
+
+        const start = () => {
+            if (deltaTimer) return;
+            deltaTimer = setInterval(pullDelta, DELTA_POLL_MS);
+            fullTimer = setInterval(() => { refetch(); }, FULL_REFRESH_MS);
+        };
+
+        const stop = () => {
+            if (deltaTimer) clearInterval(deltaTimer);
+            if (fullTimer) clearInterval(fullTimer);
+            deltaTimer = undefined;
+            fullTimer = undefined;
+        };
+
+        const onVisibility = () => {
+            if (document.hidden) {
+                stop();
+            } else {
+                pullDelta();
+                start();
+            }
+        };
+
+        if (!document.hidden) start();
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            stop();
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [pullDelta, refetch]);
 
     const filteredOrders = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();

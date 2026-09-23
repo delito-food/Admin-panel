@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { verifyApiAuth, unauthorizedResponse, checkRateLimit, rateLimitedResponse } from '@/lib/api-auth';
-import { getInvoiceNumberMap, invoiceNumberFor } from '@/lib/invoice-lookup';
+import { getInvoiceNumberMap, getInvoiceNumbersFor, invoiceNumberFor } from '@/lib/invoice-lookup';
 import { reportResponse, platformMeta } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { withAdmin } from '@/lib/api-guard';
@@ -24,6 +24,26 @@ async function handleGET(request: Request) {
         const { searchParams } = new URL(request.url);
         const status = searchParams.get('status');
 
+        // ── Delta refresh ──
+        //
+        // `?since=<ISO timestamp>` returns only orders created at or after that
+        // moment. The Orders page uses it to keep itself current without
+        // re-downloading the whole register every 90 seconds: it loads the full
+        // list once, then asks for the last day's worth and merges the result.
+        //
+        // Everything downstream of this is then sized to that slice too —
+        // invoice numbers and delivery tasks are fetched by id rather than by
+        // scanning their collections — so a refresh costs a few dozen reads
+        // instead of several thousand, and stays flat as the platform grows.
+        //
+        // A status filter is ignored in delta mode: combining an equality
+        // filter with a range on a different field needs a composite index that
+        // does not exist in this project, and the caller is merging into a list
+        // it already filters client-side anyway.
+        const sinceParam = searchParams.get('since');
+        const sinceDate = sinceParam ? new Date(sinceParam) : null;
+        const since = sinceDate && !isNaN(sinceDate.getTime()) ? sinceDate : null;
+
         // ── Limit ──
         // `limit=all` (or 0) returns the complete order register — the Orders
         // page paginates client-side and needs every row to be present so that
@@ -37,66 +57,54 @@ async function handleGET(request: Request) {
             ? MAX_LIMIT
             : Math.min(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : MAX_LIMIT, MAX_LIMIT);
 
-        let query: FirebaseFirestore.Query = db.collection(collections.orders)
-            .orderBy('createdAt', 'desc')
-            .limit(limit);
+        const ordersCollection = () => db.collection(collections.orders);
 
-        if (status && status !== 'all') {
-            query = db.collection(collections.orders)
+        let query: FirebaseFirestore.Query;
+        if (since) {
+            query = ordersCollection()
+                .where('createdAt', '>=', Timestamp.fromDate(since))
+                .orderBy('createdAt', 'desc')
+                .limit(limit);
+        } else if (status && status !== 'all') {
+            query = ordersCollection()
                 .where('status', '==', status)
+                .orderBy('createdAt', 'desc')
+                .limit(limit);
+        } else {
+            query = ordersCollection()
                 .orderBy('createdAt', 'desc')
                 .limit(limit);
         }
 
         const snapshot = await query.get();
+        const orderIds = snapshot.docs.map(doc => doc.id);
 
-        // Invoice numbers issued for these orders (used in the UI and CSV export)
-        const invoiceNumbers = await getInvoiceNumberMap();
+        // Invoice numbers issued for these orders (used in the UI and CSV export).
+        // In delta mode we know exactly which orders we are reporting on, so we
+        // fetch those invoice documents by id instead of downloading every
+        // invoice ever issued.
+        const invoiceNumbers = since
+            ? await getInvoiceNumbersFor(orderIds)
+            : await getInvoiceNumberMap();
 
-        // Collect ALL unique delivery person IDs and vendor IDs for batch lookup
-        // Note: collect deliveryPersonId regardless of whether name is stored,
-        // so we can always get the phone number too.
+        // ── Who is involved in this batch of orders ──
+        //
+        // One pass over the result collects everything the joins below need.
+        // Note: collect deliveryPersonId regardless of whether a name is stored,
+        // so we can always get the phone number too; collect the name-only
+        // orders separately, since those can only be resolved by reverse lookup.
         const deliveryPersonIds = new Set<string>();
         const vendorIds = new Set<string>();
+        const nameOnlySet = new Set<string>();
 
         snapshot.docs.forEach(doc => {
             const data = doc.data();
             if (data.deliveryPersonId) deliveryPersonIds.add(data.deliveryPersonId);
             if (data.vendorId) vendorIds.add(data.vendorId);
+            if (!data.deliveryPersonId && data.deliveryPersonName) {
+                nameOnlySet.add(data.deliveryPersonName as string);
+            }
         });
-
-        // Batch fetch delivery person details — use cached collection to avoid per-batch queries
-        const deliveryPersonDetails: Record<string, { name: string; phone: string; vehicleType: string; vehicleNumber: string; rating: number }> = {};
-        if (deliveryPersonIds.size > 0) {
-            const allDp = await cachedCollection(collections.deliveryPersons);
-            allDp.forEach(dpData => {
-                if (deliveryPersonIds.has(dpData.id)) {
-                    deliveryPersonDetails[dpData.id] = {
-                        name: (dpData.fullName || dpData.name || '') as string,
-                        phone: (dpData.phoneNumber || dpData.phone || '') as string,
-                        vehicleType: (dpData.vehicleType || '') as string,
-                        vehicleNumber: (dpData.vehicleNumber || '') as string,
-                        rating: (dpData.rating || 0) as number,
-                    };
-                }
-            });
-        }
-
-        // Batch fetch vendor details — use cached collection
-        const vendorDetails: Record<string, { phone: string; address: string; city: string; shopName: string }> = {};
-        if (vendorIds.size > 0) {
-            const allVendors = await cachedCollection(collections.vendors);
-            allVendors.forEach(vData => {
-                if (vendorIds.has(vData.id)) {
-                    vendorDetails[vData.id] = {
-                        phone: (vData.phoneNumber || vData.phone || '') as string,
-                        address: (vData.address || vData.shopAddress || '') as string,
-                        city: (vData.city || '') as string,
-                        shopName: (vData.shopName || vData.fullName || '') as string,
-                    };
-                }
-            });
-        }
 
         const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -109,39 +117,32 @@ async function handleGET(request: Request) {
             return isNaN(d.getTime()) ? null : d.toISOString();
         };
 
-        // ── Name-based reverse lookup for orders that lack a deliveryPersonId ──
-        // These orders store the name directly in the order doc, but we need
-        // vehicle type/number/rating which only live in the deliveryPersons doc.
-        const nameOnlySet = new Set<string>();
-        snapshot.docs.forEach(doc => {
-            const data = doc.data();
-            if (!data.deliveryPersonId && data.deliveryPersonName) {
-                nameOnlySet.add(data.deliveryPersonName as string);
-            }
-        });
-
-        // Keyed by name → delivery person details (use already-cached collection)
-        const detailsByName: Record<string, { phone: string; vehicleType: string; vehicleNumber: string; rating: number }> = {};
-        if (nameOnlySet.size > 0) {
-            const allDpForNames = await cachedCollection(collections.deliveryPersons);
-            allDpForNames.forEach(dd => {
-                const key = (dd.fullName || dd.name || '') as string;
-                if (key && nameOnlySet.has(key)) {
-                    detailsByName[key] = {
-                        phone: (dd.phoneNumber || dd.phone || '') as string,
-                        vehicleType: (dd.vehicleType || '') as string,
-                        vehicleNumber: (dd.vehicleNumber || '') as string,
-                        rating: (dd.rating || 0) as number,
-                    };
-                }
-            });
-        }
-
-        // ── Cross-reference deliveryTasks — use cached collection ──
-        const allOrderIdSet = new Set(snapshot.docs.map(doc => doc.id));
+        // ── Cross-reference deliveryTasks ──
+        //
+        // A full refresh scans the (cached) collection, because it needs the
+        // task for every order ever placed. A delta refresh knows its handful
+        // of order ids, so it queries for exactly those tasks — chunked into
+        // `in` filters of 30, which is Firestore's limit for that operator.
+        const allOrderIdSet = new Set(orderIds);
         const tasksByOrderId: Record<string, { deliveryPersonId: string; deliveryPersonName: string; deliveryPersonPhone: string; dispatchedAt: any; pickedUpAt: any; deliveredAt: any; taskStatus: string }> = {};
 
-        const allTasks = await cachedCollection(collections.deliveryTasks);
+        let allTasks: Array<{ id: string; [key: string]: any }>;
+        if (since) {
+            const IN_CHUNK = 30;
+            const chunks: string[][] = [];
+            for (let i = 0; i < orderIds.length; i += IN_CHUNK) {
+                chunks.push(orderIds.slice(i, i + IN_CHUNK));
+            }
+            const results = await Promise.all(
+                chunks.map(chunk =>
+                    db.collection(collections.deliveryTasks).where('orderId', 'in', chunk).get()
+                )
+            );
+            allTasks = results.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } else {
+            allTasks = await cachedCollection(collections.deliveryTasks);
+        }
+
         allTasks.forEach(taskData => {
             const orderId = taskData.orderId as string;
             if (!orderId || !allOrderIdSet.has(orderId)) return;
@@ -168,17 +169,56 @@ async function handleGET(request: Request) {
             }
         });
 
-        // Fill in any newly discovered delivery person IDs from tasks
-        if (deliveryPersonIds.size > 0) {
+        // ── Delivery partners and vendors, read once ──
+        //
+        // This used to read the deliveryPersons collection three separate times
+        // — once for ids found on orders, once for the name-only reverse
+        // lookup, once more for ids discovered via delivery tasks. The cache
+        // absorbed two of those, but only when it happened to be warm; on a
+        // cold serverless instance it was three full scans of the same data.
+        // Both maps are now built in a single pass, after the task
+        // cross-reference has contributed every id it knows about.
+        const deliveryPersonDetails: Record<string, { name: string; phone: string; vehicleType: string; vehicleNumber: string; rating: number }> = {};
+        const detailsByName: Record<string, { phone: string; vehicleType: string; vehicleNumber: string; rating: number }> = {};
+
+        if (deliveryPersonIds.size > 0 || nameOnlySet.size > 0) {
             const allDp = await cachedCollection(collections.deliveryPersons);
             allDp.forEach(dpData => {
-                if (deliveryPersonIds.has(dpData.id) && !deliveryPersonDetails[dpData.id]) {
+                const name = (dpData.fullName || dpData.name || '') as string;
+
+                if (deliveryPersonIds.has(dpData.id)) {
                     deliveryPersonDetails[dpData.id] = {
-                        name: (dpData.fullName || dpData.name || '') as string,
+                        name,
                         phone: (dpData.phoneNumber || dpData.phone || '') as string,
                         vehicleType: (dpData.vehicleType || '') as string,
                         vehicleNumber: (dpData.vehicleNumber || '') as string,
                         rating: (dpData.rating || 0) as number,
+                    };
+                }
+
+                // Orders that store only a partner's name still need the
+                // vehicle details, which live on the partner document.
+                if (name && nameOnlySet.has(name)) {
+                    detailsByName[name] = {
+                        phone: (dpData.phoneNumber || dpData.phone || '') as string,
+                        vehicleType: (dpData.vehicleType || '') as string,
+                        vehicleNumber: (dpData.vehicleNumber || '') as string,
+                        rating: (dpData.rating || 0) as number,
+                    };
+                }
+            });
+        }
+
+        const vendorDetails: Record<string, { phone: string; address: string; city: string; shopName: string }> = {};
+        if (vendorIds.size > 0) {
+            const allVendors = await cachedCollection(collections.vendors);
+            allVendors.forEach(vData => {
+                if (vendorIds.has(vData.id)) {
+                    vendorDetails[vData.id] = {
+                        phone: (vData.phoneNumber || vData.phone || '') as string,
+                        address: (vData.address || vData.shopAddress || '') as string,
+                        city: (vData.city || '') as string,
+                        shopName: (vData.shopName || vData.fullName || '') as string,
                     };
                 }
             });

@@ -66,10 +66,39 @@ export function Notifications({ isOpen, onClose }: NotificationsProps) {
         fetchNotifications();
     }, []);
 
-    // Auto-poll
+    // Auto-poll — suspended while the tab is in the background.
+    //
+    // This panel is mounted on every page of the panel, so its timer was the
+    // one thing guaranteed to keep querying Firestore whether or not anyone
+    // was looking. A backgrounded tab now costs nothing, and coming back to it
+    // refreshes immediately rather than waiting out the remaining interval.
     useEffect(() => {
-        const id = setInterval(fetchNotifications, POLL_INTERVAL_MS);
-        return () => clearInterval(id);
+        let timer: ReturnType<typeof setInterval> | undefined;
+
+        const start = () => {
+            if (!timer) timer = setInterval(fetchNotifications, POLL_INTERVAL_MS);
+        };
+        const stop = () => {
+            if (timer) clearInterval(timer);
+            timer = undefined;
+        };
+
+        const onVisibility = () => {
+            if (document.hidden) {
+                stop();
+            } else {
+                fetchNotifications();
+                start();
+            }
+        };
+
+        if (!document.hidden) start();
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            stop();
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
     }, [fetchNotifications]);
 
     const visible = notifications.filter(n => !dismissed.has(n.id));
