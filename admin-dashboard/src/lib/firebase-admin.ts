@@ -3,6 +3,8 @@ import { initializeApp, getApps, cert, type ServiceAccount, type App } from 'fir
 import { getFirestore, type Firestore, Timestamp } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getStorage } from 'firebase-admin/storage';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Resolve Google's hosts over IPv4 first.
@@ -325,6 +327,57 @@ export async function sendBulkPushNotification(
     }
 
     return { successCount, failureCount, failedTokens };
+}
+
+// ── Storage ──
+
+/**
+ * Upload an image through the Admin SDK and return a URL the apps can load.
+ *
+ * Why server-side rather than from the browser: storage.rules only let a
+ * vendor write under `vendor_profiles/{vendorId}/`, keyed on their own uid, so
+ * an admin signed in as themselves is refused. The Admin SDK is not subject to
+ * storage.rules at all, which means an admin can replace a vendor's outlet
+ * photo without loosening the rule that stops vendors writing to each other's
+ * folders.
+ *
+ * The returned URL carries a download token, the same shape the apps already
+ * receive from the client SDK, so Coil loads it exactly like a vendor upload
+ * and it keeps working regardless of how storage.rules change later.
+ */
+export async function uploadImage(
+    path: string,
+    data: Buffer,
+    contentType: string
+): Promise<string> {
+    const adminApp = initFirebaseAdmin();
+    if (!adminApp) {
+        throw new Error('Firebase not initialized. Please set environment variables.');
+    }
+
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET
+        || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+    if (!bucketName) {
+        throw new Error(
+            'No storage bucket configured. Set NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ' +
+            '(the same value the client config uses).'
+        );
+    }
+
+    const token = randomUUID();
+    const file = getStorage(adminApp).bucket(bucketName).file(path);
+
+    await file.save(data, {
+        contentType,
+        resumable: false,
+        metadata: {
+            contentType,
+            cacheControl: 'public, max-age=31536000',
+            metadata: { firebaseStorageDownloadTokens: token },
+        },
+    });
+
+    return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
 }
 
 // ── Server-side in-memory cache ──
