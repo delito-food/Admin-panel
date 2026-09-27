@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronLeft } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronLeft, Gift } from 'lucide-react';
 import {
     NAV,
     NAV_FOOTER,
@@ -44,18 +44,22 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     const active = findActive(pathname);
     const activeSectionId = active?.section.id;
 
-    const [openSections, setOpenSections] = useState<string[]>([]);
+    // Sections the admin left open last time, plus the one owning this page.
+    // (The sidebar only mounts client-side, after sign-in, so storage is readable.)
+    const [openSections, setOpenSections] = useState<string[]>(() => {
+        const stored = typeof window === 'undefined' ? [] : readStoredSections();
+        return activeSectionId && !stored.includes(activeSectionId) ? [...stored, activeSectionId] : stored;
+    });
 
-    // Restore the sections the admin left open last time
-    useEffect(() => {
-        setOpenSections(readStoredSections());
-    }, []);
-
-    // Always reveal the section that owns the current page
-    useEffect(() => {
-        if (!activeSectionId) return;
-        setOpenSections((prev) => (prev.includes(activeSectionId) ? prev : [...prev, activeSectionId]));
-    }, [activeSectionId]);
+    // Navigating to a page in a closed section opens it (state adjusted during
+    // render rather than in an effect, as React recommends)
+    const [seenActive, setSeenActive] = useState(activeSectionId);
+    if (activeSectionId !== seenActive) {
+        setSeenActive(activeSectionId);
+        if (activeSectionId && !openSections.includes(activeSectionId)) {
+            setOpenSections([...openSections, activeSectionId]);
+        }
+    }
 
     const toggleSection = (id: string) => {
         setOpenSections((prev) => {
@@ -211,8 +215,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </nav>
 
             {/* Pinned footer */}
-            <div className="sb-footer">
+            <div className={`sb-footer ${collapsed ? 'is-collapsed' : ''}`}>
                 {renderSection(NAV_FOOTER)}
+                {/* Our story — a gift in the bottom-left corner */}
+                <Link
+                    href="/story"
+                    className="sb-story"
+                    title="Our story"
+                    aria-label="Open our story"
+                >
+                    <Gift size={17} strokeWidth={2.2} />
+                </Link>
             </div>
         </motion.aside>
     );

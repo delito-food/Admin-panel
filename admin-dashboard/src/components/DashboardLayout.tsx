@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SangyaanLoader, LOADER_TOTAL_MS } from './SangyaanLoader';
-import { StoryGiftButton } from './StoryGiftButton';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AuthProvider, useAuth } from '@/lib/auth';
@@ -116,11 +115,6 @@ function DashboardContent({ children }: DashboardLayoutProps) {
                     {children}
                 </div>
             </motion.main>
-
-            {/* Gift in the bottom-left of the dashboard → our story */}
-            {pathname === '/' && (
-                <StoryGiftButton left={isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH)} />
-            )}
         </div>
     );
 

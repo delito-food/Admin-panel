@@ -1493,8 +1493,61 @@ body {
 /* Pinned footer */
 .sb-footer {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--border);
+}
+
+.sb-footer > .sb-section-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Icon rail: Settings above the gift */
+.sb-footer.is-collapsed {
+  flex-direction: column;
+}
+
+.sb-footer.is-collapsed > .sb-section-btn {
+  flex: none;
+}
+
+/* Gift → /story */
+.sb-story {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #F5C518;
+  color: #1B4332;
+  text-decoration: none;
+  box-shadow: 0 6px 14px -6px rgba(196, 154, 16, 0.8);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.sb-story:hover {
+  transform: translateY(-1px) rotate(-6deg);
+  box-shadow: 0 8px 18px -6px rgba(196, 154, 16, 0.95);
+}
+
+.sb-story svg {
+  animation: sb-story-wiggle 4.5s ease-in-out infinite;
+}
+
+@keyframes sb-story-wiggle {
+  0%, 86%, 100% { transform: rotate(0); }
+  89% { transform: rotate(-14deg); }
+  92% { transform: rotate(12deg); }
+  95% { transform: rotate(-8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-story svg { animation: none; }
 }
 
 .sidebar-premium.is-collapsed .sb-footer {
@@ -2941,75 +2994,6 @@ canvas {
   .sgy-glow {
     animation: none;
   }
-}
-
-
-/* ===================================
-   STORY GIFT BUTTON (dashboard, bottom-left)
-   =================================== */
-
-.story-fab-wrap {
-  /* position / left / bottom are inline in StoryGiftButton.tsx */
-}
-
-.story-fab {
-  position: relative;
-  display: flex;
-  align-items: center;
-  height: 56px;
-  padding: 0 16px;
-  border-radius: 999px;
-  background: #F5C518;
-  color: #1B4332;
-  text-decoration: none;
-  box-shadow: 0 12px 28px -8px rgba(196, 154, 16, 0.75), 0 0 0 4px color-mix(in srgb, var(--background) 80%, transparent);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.story-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 16px 34px -8px rgba(196, 154, 16, 0.9), 0 0 0 4px color-mix(in srgb, var(--background) 80%, transparent);
-}
-
-.story-fab-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 2px solid #F5C518;
-  animation: story-fab-ring 2.4s ease-out infinite;
-  pointer-events: none;
-}
-
-@keyframes story-fab-ring {
-  from { transform: scale(1); opacity: 0.8; }
-  to { transform: scale(1.35, 1.6); opacity: 0; }
-}
-
-/* Label slides out on hover (always shown on touch screens) */
-.story-fab-label {
-  max-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: 0.88rem;
-  font-weight: 700;
-  transition: max-width 0.3s ease, margin 0.3s ease;
-}
-
-.story-fab:hover .story-fab-label,
-.story-fab:focus-visible .story-fab-label {
-  max-width: 120px;
-  margin-left: 10px;
-}
-
-@media (hover: none) {
-  .story-fab-label {
-    max-width: 120px;
-    margin-left: 10px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .story-fab-ring { animation: none; }
 }
 
 } /* end @layer components */
