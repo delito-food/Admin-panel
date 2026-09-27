@@ -32,56 +32,21 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { db, collections } from '@/lib/firebase-admin';
 import { withAdmin } from '@/lib/api-guard';
 import { checkRateLimit, rateLimitedResponse, type AdminResult } from '@/lib/api-auth';
-import { PLATFORM } from '@/lib/invoice-constants';
 import { generateInvoicePDF } from '@/lib/invoice-pdf';
-import { computeOrderEconomics, isBillableStatus, isCancelledStatus } from '@/lib/pricing-engine';
-import {
-    INVOICE_SCHEMA_VERSION,
-    assertIssuable,
-    buildTaxSummary,
-    buildTotals,
-    type Party,
-    type StoredInvoice,
-} from '@/lib/invoice-document';
+import { INVOICE_SCHEMA_VERSION, type StoredInvoice } from '@/lib/invoice-document';
+import { buildInvoiceDraft, type ComposedInvoice } from '@/lib/invoice-compose';
 import { storedInvoiceToRenderData } from '@/lib/invoice-render';
-import { SERIES, counterDocId, formatSerial } from '@/lib/invoice-series';
+import { SERIES, assertCounterContinued, counterDocId, formatSerial } from '@/lib/invoice-series';
 import { financialYearOf, toDate } from '@/lib/fiscal';
-import {
-    HOME_STATE_CODE,
-    isInterState as computeInterState,
-    placeOfSupplyLabel,
-    resolveStateCode,
-    stateName,
-} from '@/lib/gst';
 
 const INVOICES = 'invoices';
 
-/** Delito, as it appears in the supplier block of every customer invoice. */
-function delitoParty(): Party {
-    return {
-        name: PLATFORM.legalName || PLATFORM.name,
-        address: PLATFORM.address,
-        city: 'Hathras',
-        state: stateName(HOME_STATE_CODE),
-        stateCode: HOME_STATE_CODE,
-        gstin: PLATFORM.gstin,
-        fssai: PLATFORM.fssaiLicense,
-        phone: PLATFORM.phone,
-        email: PLATFORM.email,
-    };
-}
-
 /**
  * Build the document that would be issued for this order, without issuing it.
- * Pure: reads the order and its related records, computes, returns.
+ * Reads the order and its related records, then composes with the shared,
+ * pure builder in lib/invoice-compose.ts (also used by the renumbering script).
  */
-async function composeInvoice(orderId: string): Promise<{
-    draft: Omit<StoredInvoice, 'invoiceNumber' | 'series' | 'sequence' | 'financialYear' | 'invoiceDate' | 'issuedAt' | 'issuedBy'>;
-    issuable: { ok: true } | { ok: false; reason: string };
-    /** Set when the order's status forbids issuing a NEW serial. */
-    statusBlock: string | null;
-    order: any;
-}> {
+async function composeInvoice(orderId: string): Promise<ComposedInvoice & { order: any }> {
     const orderSnap = await db.collection(collections.orders).doc(orderId).get();
     if (!orderSnap.exists) throw new Error('Order not found');
     const order = orderSnap.data()!;
@@ -98,95 +63,7 @@ async function composeInvoice(orderId: string): Promise<{
     const vendor: any = vendorSnap?.exists ? vendorSnap.data() : {};
     const deliveryPerson: any = dpSnap?.exists ? dpSnap.data() : {};
 
-    // Place of supply for a B2C food delivery is where the goods are delivered.
-    // Delito operates within Uttar Pradesh, so this is intra-state unless the
-    // customer's own record says otherwise.
-    const recipientStateCode = resolveStateCode(
-        order.customerGstin as string | undefined,
-        (order.deliveryState || order.customerState || vendor.state) as string | undefined
-    ) || HOME_STATE_CODE;
-    const interState = computeInterState(HOME_STATE_CODE, recipientStateCode);
-
-    const commissionRate = typeof vendor.commissionRate === 'number' ? vendor.commissionRate : undefined;
-    const economics = computeOrderEconomics(order, orderId, { interState, commissionRatePercent: commissionRate });
-
-    const orderInstant = toDate(order.deliveredAt) || toDate(order.createdAt) || new Date();
-
-    const recipient: Party = {
-        name: (order.customerName as string) || 'Customer',
-        address: (order.deliveryAddress as string) || '',
-        city: (order.deliveryCity as string) || '',
-        state: stateName(recipientStateCode),
-        stateCode: recipientStateCode,
-        gstin: (order.customerGstin as string) || '',
-        fssai: '',
-        phone: (order.customerPhone as string) || '',
-        email: (order.customerEmail as string) || '',
-    };
-
-    const draft = {
-        schemaVersion: INVOICE_SCHEMA_VERSION,
-        documentType: 'TAX_INVOICE' as const,
-
-        orderId,
-        orderReference: orderId.length > 12 ? orderId.slice(-12).toUpperCase() : orderId.toUpperCase(),
-        orderDate: orderInstant.toISOString(),
-        orderStatus: (order.status as string) || 'Unknown',
-        vendorId: (order.vendorId as string) || '',
-        customerId: (order.customerId as string) || '',
-
-        supplier: delitoParty(),
-        recipient,
-        restaurant: {
-            name: (order.vendorName || vendor.shopName || vendor.fullName || 'Restaurant') as string,
-            address: (vendor.address || vendor.shopAddress || '') as string,
-            city: (vendor.city || '') as string,
-            gstin: (vendor.gstNumber || vendor.gstin || '') as string,
-            fssai: (vendor.fssaiLicense || '') as string,
-        },
-        deliveryPartner: {
-            name: (deliveryPerson.fullName || '') as string,
-            phone: (deliveryPerson.phoneNumber || deliveryPerson.phone || '') as string,
-        },
-        supplierOfRecordNote:
-            `Tax invoice issued by ${PLATFORM.name} as the electronic commerce operator liable to pay tax ` +
-            `under section 9(5) of the CGST Act, 2017.`,
-
-        placeOfSupply: placeOfSupplyLabel(recipientStateCode),
-        placeOfSupplyCode: recipientStateCode,
-        isInterState: interState,
-        reverseCharge: false,
-
-        lines: economics.lines,
-        components: economics.components,
-        discounts: economics.discounts,
-        taxSummary: buildTaxSummary(economics.components),
-        totals: buildTotals(economics),
-
-        payment: {
-            mode: (order.paymentMode as string) || 'Cash on Delivery',
-            status: (order.paymentStatus as string) || 'Pending',
-            transactionId: (order.transactionId || order.paymentId || '') as string,
-        },
-
-        reconciliation: economics.reconciliation,
-    };
-
-    // Two separate gates. The arithmetic one is absolute: a document whose
-    // parts do not foot must never be produced. The status one only governs
-    // issuing a NEW serial — an invoice already issued under the legacy series
-    // still has to be reprintable even if the order was later cancelled, since
-    // the customer is holding it.
-    const issuable = assertIssuable(economics);
-
-    let statusBlock: string | null = null;
-    if (isCancelledStatus(order.status)) {
-        statusBlock = 'Order is cancelled — a tax invoice cannot be issued. Raise a credit note against the original invoice instead.';
-    } else if (!isBillableStatus(order.status)) {
-        statusBlock = `Order is "${order.status}" — an invoice is issued once the order is delivered.`;
-    }
-
-    return { draft, issuable, statusBlock, order };
+    return { ...buildInvoiceDraft(orderId, order, vendor, deliveryPerson), order };
 }
 
 /**
@@ -198,15 +75,27 @@ async function composeInvoice(orderId: string): Promise<{
  * customer's hands, so it must be carried forward rather than replaced, and a
  * second serial must never be drawn for the same order.
  */
-async function readInvoiceRecord(orderId: string): Promise<{ document: StoredInvoice | null; legacyNumber: string | null }> {
+async function readInvoiceRecord(orderId: string): Promise<{
+    document: StoredInvoice | null;
+    legacyNumber: string | null;
+    /** ISO invoice date fixed by scripts/renumber-invoice-series.js, if any. */
+    reservedDate: string | null;
+}> {
     const snap = await db.collection(INVOICES).doc(orderId).get();
-    if (!snap.exists) return { document: null, legacyNumber: null };
+    if (!snap.exists) return { document: null, legacyNumber: null, reservedDate: null };
     const data = snap.data() as any;
-    if (!data?.invoiceNumber) return { document: null, legacyNumber: null };
+    if (!data?.invoiceNumber) return { document: null, legacyNumber: null, reservedDate: null };
     if (data.schemaVersion === INVOICE_SCHEMA_VERSION) {
-        return { document: data as StoredInvoice, legacyNumber: null };
+        return { document: data as StoredInvoice, legacyNumber: null, reservedDate: null };
     }
-    return { document: null, legacyNumber: String(data.invoiceNumber) };
+    // A number without a document: either an old pre-Phase-2 serial, or one
+    // reserved in delivery-date order by the renumbering script (which also
+    // fixes the invoice date). Both are carried forward, never replaced.
+    return {
+        document: null,
+        legacyNumber: String(data.invoiceNumber),
+        reservedDate: typeof data.invoiceDate === 'string' && data.invoiceDate ? data.invoiceDate : null,
+    };
 }
 
 /**
@@ -218,7 +107,8 @@ async function issueInvoice(
     orderId: string,
     draft: Awaited<ReturnType<typeof composeInvoice>>['draft'],
     issuedBy: string,
-    legacyNumber: string | null
+    legacyNumber: string | null,
+    reservedDate: string | null = null
 ): Promise<StoredInvoice> {
     const invoiceRef = db.collection(INVOICES).doc(orderId);
     const now = new Date();
@@ -242,6 +132,7 @@ async function issueInvoice(
 
         if (!legacyNumber) {
             const counterSnap = await tx.get(counterRef);
+            assertCounterContinued('invoice', fy.label, counterSnap.data());
             let current: number;
             if (!counterSnap.exists) {
                 current = 0;
@@ -258,13 +149,19 @@ async function issueInvoice(
 
         const issuedAt = Timestamp.now();
 
+        // A number reserved by the renumbering script is part of the live
+        // continued series; only a pre-Phase-2 serial with no reservation is
+        // marked LEGACY.
+        const reservedFy = reservedDate ? financialYearOf(new Date(reservedDate)).label : '';
         const document: StoredInvoice = {
             ...draft,
             invoiceNumber,
-            series: legacyNumber ? 'LEGACY' : SERIES.invoice.prefix,
+            series: legacyNumber ? (reservedDate ? SERIES.invoice.prefix : 'LEGACY') : SERIES.invoice.prefix,
             sequence,
-            financialYear: legacyNumber ? '' : fy.label,
-            invoiceDate: issuedAt.toDate().toISOString(),
+            financialYear: legacyNumber ? reservedFy : fy.label,
+            // Reserved numbers carry the delivery date (date of supply) so the
+            // series reads in date order.
+            invoiceDate: reservedDate || issuedAt.toDate().toISOString(),
             issuedAt: issuedAt.toDate().toISOString(),
             issuedBy,
         };
@@ -321,8 +218,8 @@ async function handleGET(
                     invoiceNumber: record.legacyNumber || '',
                     series: SERIES.invoice.prefix,
                     sequence: 0,
-                    financialYear: financialYearOf(new Date()).label,
-                    invoiceDate: new Date().toISOString(),
+                    financialYear: financialYearOf(new Date(record.reservedDate || Date.now())).label,
+                    invoiceDate: record.reservedDate || new Date().toISOString(),
                     issuedAt: '',
                     issuedBy: '',
                 } as StoredInvoice);
@@ -344,7 +241,7 @@ async function handleGET(
                 return NextResponse.json({ success: false, error: blocked }, { status: 409 });
             }
 
-            stored = await issueInvoice(orderId, draft, auth.email || auth.uid || 'unknown', record.legacyNumber);
+            stored = await issueInvoice(orderId, draft, auth.email || auth.uid || 'unknown', record.legacyNumber, record.reservedDate);
         }
 
         const renderData = storedInvoiceToRenderData(stored);

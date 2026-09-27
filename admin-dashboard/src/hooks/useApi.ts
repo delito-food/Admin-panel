@@ -465,6 +465,14 @@ export interface Order {
         quantity: number;
         originalPrice?: number;
         discountedPrice?: number;
+        specialInstructions?: string;
+        /** Variant name, e.g. "Full Plate", and its menu price */
+        selectedVariant?: string;
+        selectedVariantPrice?: number;
+        selectedAddOns?: string[];
+        addOnsTotal?: number;
+        selectedCombo?: string;
+        comboExtraPrice?: number;
     }>;
     itemNames: string[];
     itemTotal: number;
@@ -524,6 +532,20 @@ export interface Order {
     vendorGstOnPlatformCut: number;
     vendorTotalDeduction: number;
     vendorEarning: number;
+    // Price build-up (see PricingCalculator.kt); optional on older orders
+    technologyServiceFee?: number;
+    codCharges?: number;
+    deliveryFeeBeforeDiscount?: number;
+    isFreeDeliveryOffer?: boolean;
+    deliveryPersonEarnings?: number;
+    gstOnFood?: number;
+    gstOnServices?: number;
+    campaignTitle?: string;
+    campaignDiscount?: number;
+    campaignVendorFunded?: number;
+    campaignPlatformFunded?: number;
+    hungerGameTotalDiscount?: number;
+    hungerGameLevel2DeliveryDiscount?: number;
 }
 
 export interface PendingVendor {

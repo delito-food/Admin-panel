@@ -246,16 +246,24 @@ check('financial year runs April to March', () => {
 });
 
 check('serials fit Rule 46: 16 characters, round-trip cleanly', () => {
-    const serial = formatSerial('invoice', '26-27', 137);
-    eq(serial.length, 16, 'serial length');
-    assert(serial === 'DLT/26-27/000137', `unexpected serial: ${serial}`);
-    for (const key of ['invoice', 'creditNote', 'commission', 'commissionCreditNote']) {
-        const s = formatSerial(key, '26-27', 1);
+    // Customer and commission invoices continue the CA-filed series
+    // (INV-2026-000078, DLT-COM-2607-069) — see INVOICE_CONTINUATION.md.
+    const serial = formatSerial('invoice', '26-27', 79);
+    assert(serial === 'INV-2026-000079', `unexpected serial: ${serial}`);
+    const com = formatSerial('commission', '26-27', 70, '2026-08');
+    assert(com === 'DLT-COM-2608-070', `unexpected commission serial: ${com}`);
+    eq(com.length, 16, 'commission serial length');
+    for (const key of ['invoice', 'creditNote', 'debitNote', 'commission', 'commissionCreditNote', 'commissionDebitNote']) {
+        const s = formatSerial(key, '26-27', 1, '2027-03');
         assert(s.length <= 16, `${key} serial "${s}" is ${s.length} characters — Rule 46 caps it at 16`);
         assert(/^[A-Z0-9/-]+$/.test(s), `${key} serial has characters Rule 46 does not allow`);
     }
-    const parsed = parseSerial('DCM/26-27/000072');
-    assert(parsed.series === 'commission' && parsed.sequence === 72, 'serial should round-trip');
+    const inv = parseSerial('INV-2026-000079');
+    assert(inv.series === 'invoice' && inv.sequence === 79 && inv.fyLabel === '26-27', 'invoice serial should round-trip');
+    const c = parseSerial('DLT-COM-2703-071');
+    assert(c.series === 'commission' && c.sequence === 71 && c.fyLabel === '26-27', 'March commission belongs to FY 26-27');
+    const retired = parseSerial('DCM/26-27/000072');
+    assert(retired.series === 'commission' && retired.sequence === 72, 'retired Phase-2 serials still parse');
 });
 
 

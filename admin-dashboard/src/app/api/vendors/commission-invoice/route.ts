@@ -40,7 +40,7 @@ import {
     CommissionInvoiceData,
     commissionInvoiceDocId,
 } from '@/lib/invoice-constants';
-import { counterDocId, formatSerial, SERIES } from '@/lib/invoice-series';
+import { assertCounterContinued, counterDocId, formatSerial, SERIES } from '@/lib/invoice-series';
 import {
     daysInMonth,
     financialYearOf,
@@ -267,6 +267,7 @@ async function issueCommissionInvoice(
         }
 
         const counterSnap = await tx.get(counterRef);
+        assertCounterContinued('commission', fy.label, counterSnap.data());
         let current: number;
         if (!counterSnap.exists) {
             current = 0;
@@ -279,7 +280,7 @@ async function issueCommissionInvoice(
         }
 
         const sequence = current + 1;
-        const invoiceNumber = formatSerial('commission', fy.label, sequence);
+        const invoiceNumber = formatSerial('commission', fy.label, sequence, month);
         const issuedAt = Timestamp.now();
 
         tx.set(counterRef, {
@@ -362,6 +363,17 @@ async function handleGET(request: NextRequest, _ctx: unknown, auth: AdminResult)
         let invoiceNumber = issued?.invoiceNumber || COMMISSION_INVOICE_NOT_ISSUED;
         let issuedAt = issued?.issuedAt || null;
 
+        const snapshotToFreeze = {
+            vendorName: (vendorData.shopName || vendorData.fullName || 'Restaurant') as string,
+            vendorGstin: (vendorData.gstNumber || '') as string,
+            vendorStateCode,
+            isInterState: interState,
+            commissionRate,
+            commissionBasis: 'pre-discount item total',
+            weeklyBreakdown: aggregate.weeklyBreakdown,
+            monthlyTotals: aggregate.monthlyTotals,
+        };
+
         if (!issued && shouldIssue) {
             if (aggregate.monthlyTotals.orders === 0) {
                 return NextResponse.json(
@@ -369,18 +381,16 @@ async function handleGET(request: NextRequest, _ctx: unknown, auth: AdminResult)
                     { status: 409 }
                 );
             }
-            const fresh = await issueCommissionInvoice(vendorId, month, {
-                vendorName: (vendorData.shopName || vendorData.fullName || 'Restaurant') as string,
-                vendorGstin: (vendorData.gstNumber || '') as string,
-                vendorStateCode,
-                isInterState: interState,
-                commissionRate,
-                commissionBasis: 'pre-discount item total',
-                weeklyBreakdown: aggregate.weeklyBreakdown,
-                monthlyTotals: aggregate.monthlyTotals,
-            }, auth.email || auth.uid || 'unknown');
+            const fresh = await issueCommissionInvoice(vendorId, month, snapshotToFreeze, auth.email || auth.uid || 'unknown');
             invoiceNumber = fresh.invoiceNumber;
             issuedAt = fresh.issuedAt;
+        } else if (issued && !issued.snapshot && shouldIssue && aggregate.monthlyTotals.orders > 0) {
+            // A number reserved by scripts/renumber-invoice-series.js has no
+            // snapshot yet. Freeze it the first time the invoice is downloaded,
+            // keeping the reserved number and date.
+            await db.collection(COMMISSION_INVOICES_COLLECTION)
+                .doc(commissionInvoiceDocId(vendorId, month))
+                .set({ snapshot: snapshotToFreeze, snapshotFrozenBy: auth.email || auth.uid || 'unknown' }, { merge: true });
         }
 
         const tax = splitTax(aggregate.monthlyTotals.gstOnCommission, interState);

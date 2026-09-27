@@ -79,3 +79,6 @@ _to_delete/
 _stage_theme/
 _claude_transfer/
 Claude outputs/
+
+# invoice renumbering workbooks (business data)
+/invoice-continuation/

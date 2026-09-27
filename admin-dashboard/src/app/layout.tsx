@@ -10,8 +10,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Delito Admin Dashboard",
-  description: "Admin dashboard for Delito food delivery platform",
+  title: "Sangyaan",
+  description: "Sangyaan — the Delito admin panel",
 };
 
 // Phone-first viewport — allows pinch-zoom on the wide report tables

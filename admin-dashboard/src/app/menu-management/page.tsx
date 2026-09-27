@@ -6,7 +6,7 @@ import {
     Search, Filter, Eye, CheckCircle, XCircle, Clock, Package,
     ChevronDown, RefreshCw, UtensilsCrossed, Store, X, AlertTriangle,
     DollarSign, ImageIcon, Edit3, Check, Loader2, MessageSquare,
-    CheckCheck, Ban, Leaf, Drumstick,
+    CheckCheck, Ban, Leaf, Drumstick, IndianRupee,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -512,6 +512,9 @@ export default function MenuManagementPage() {
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                         <span style={{ padding: '4px 12px', borderRadius: 20, background: 'rgba(244,81,30,0.08)', color: 'var(--primary)', fontSize: '0.78rem', fontWeight: 700 }}>{group.items.length} items</span>
+                                        <a href={`/menu-management/vendor/${group.vendorId}?tab=pricing`} title="Change prices category-wise" style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--primary)', color: 'var(--primary)', fontSize: '0.78rem', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                            <IndianRupee size={13} /> Prices
+                                        </a>
                                         <a href={`/menu-management/vendor/${group.vendorId}`} style={{ padding: '6px 14px', borderRadius: 8, background: 'var(--primary)', color: 'white', fontSize: '0.78rem', fontWeight: 600, textDecoration: 'none' }}>
                                             Manage Menu &rarr;
                                         </a>

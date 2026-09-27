@@ -1,26 +1,35 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { ThemeToggle } from './ThemeToggle';
 import { Notifications } from './Notifications';
-import { Bell, Search, Menu, LogOut, User, ChevronDown, Settings } from 'lucide-react';
+import { Bell, Menu, LogOut, ChevronDown, ChevronRight, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
+import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED, findActive } from './nav-config';
 
 interface HeaderProps {
     sidebarCollapsed: boolean;
     onMenuClick: () => void;
 }
 
+/** "/vendors/suspend" → "Suspend" for pages that aren't in the sidebar. */
+function titleFromPath(pathname: string) {
+    const last = pathname.split('/').filter(Boolean).pop() ?? 'Dashboard';
+    return last.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
     const { user, logout } = useAuth();
+    const pathname = usePathname();
     const [showNotifications, setShowNotifications] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [scrolled, setScrolled] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const profileMenuRef = useRef<HTMLDivElement>(null);
 
-    // Detect mobile
     useEffect(() => {
         const checkMobile = () => setIsMobile(window.innerWidth < 1024);
         checkMobile();
@@ -28,7 +37,6 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // Close profile menu when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
@@ -40,58 +48,67 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
     }, []);
 
     useEffect(() => {
-        const handleScroll = () => {
-            setScrolled(window.scrollY > 10);
-        };
-
+        const handleScroll = () => setScrolled(window.scrollY > 4);
         window.addEventListener('scroll', handleScroll, { passive: true });
-        handleScroll(); // Check initial state
+        handleScroll();
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    const sidebarWidth = isMobile ? 0 : (sidebarCollapsed ? 80 : 280);
+    // Close menus when the route changes
+    useEffect(() => {
+        setShowProfileMenu(false);
+        setShowNotifications(false);
+    }, [pathname]);
+
+    const sidebarWidth = isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH);
+
+    const active = findActive(pathname);
+    const pageTitle = active?.label ?? titleFromPath(pathname);
+    const parent = active && active.section.items ? active.section.label : null;
+
+    const initial = user?.name?.charAt(0).toUpperCase() || 'A';
+    const roleLabel = user?.role === 'super_admin' ? 'Super Admin' : 'Admin';
 
     return (
         <motion.header
             initial={false}
-            animate={{
-                left: sidebarWidth,
-            }}
+            animate={{ left: sidebarWidth }}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-            className={`header-premium ${scrolled ? 'header-scrolled' : ''}`}
+            className={`topbar ${scrolled ? 'is-scrolled' : ''}`}
         >
-            {/* Mobile Menu Button */}
-            <button
-                onClick={onMenuClick}
-                className="lg:hidden header-action-btn"
-            >
-                <Menu size={22} />
-            </button>
+            {/* Left: menu + breadcrumb */}
+            <div className="topbar-left">
+                <button
+                    type="button"
+                    onClick={onMenuClick}
+                    className="topbar-icon-btn topbar-menu-btn"
+                    aria-label="Open menu"
+                >
+                    <Menu size={20} />
+                </button>
 
-            {/* Search Bar */}
-            <div className="hidden md:block header-search">
-                <Search size={18} className="header-search-icon" />
-                <input
-                    type="text"
-                    placeholder="Search vendors, orders, users..."
-                    className="header-search-input"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 text-[10px] text-[var(--foreground-secondary)]">
-                    <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded border border-[var(--border)] font-medium">⌘</kbd>
-                    <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded border border-[var(--border)] font-medium">K</kbd>
-                </div>
+                <nav className="topbar-crumbs" aria-label="Breadcrumb">
+                    {parent && (
+                        <>
+                            <span className="topbar-crumb-parent">{parent}</span>
+                            <ChevronRight size={14} className="topbar-crumb-sep" />
+                        </>
+                    )}
+                    <span className="topbar-crumb-current">{pageTitle}</span>
+                </nav>
             </div>
 
-            {/* Right Actions */}
-            <div className="header-actions">
-                {/* Notifications */}
+            {/* Right: actions */}
+            <div className="topbar-actions">
                 <div className="relative">
                     <button
+                        type="button"
                         onClick={() => setShowNotifications(!showNotifications)}
-                        className="header-action-btn"
+                        className="topbar-icon-btn"
+                        aria-label="Notifications"
                     >
-                        <Bell size={22} />
-                        <span className="notification-dot" />
+                        <Bell size={19} />
+                        <span className="topbar-dot" />
                     </button>
                     <Notifications
                         isOpen={showNotifications}
@@ -99,87 +116,67 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
                     />
                 </div>
 
-                {/* Theme Toggle */}
                 <ThemeToggle />
 
-                {/* Admin Profile with Dropdown */}
+                <span className="topbar-divider" aria-hidden />
+
                 <div className="relative" ref={profileMenuRef}>
                     <button
+                        type="button"
                         onClick={() => setShowProfileMenu(!showProfileMenu)}
-                        className="header-profile group cursor-pointer"
+                        className="topbar-profile"
+                        aria-haspopup="menu"
+                        aria-expanded={showProfileMenu}
                     >
-                        <div className="header-profile-info hidden sm:block text-right">
-                            <p className="header-profile-name">{user?.name || 'Admin'}</p>
-                            <p className="header-profile-role">{user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}</p>
-                        </div>
-                        <div className="header-profile-avatar">
-                            <span>{user?.name?.charAt(0).toUpperCase() || 'A'}</span>
-                        </div>
+                        <span className="topbar-avatar">{initial}</span>
+                        <span className="topbar-profile-text">
+                            <span className="topbar-profile-name">{user?.name || 'Admin'}</span>
+                            <span className="topbar-profile-role">{roleLabel}</span>
+                        </span>
                         <ChevronDown
-                            size={16}
-                            className={`hidden sm:block text-[var(--foreground-secondary)] transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`}
+                            size={15}
+                            className={`topbar-profile-chevron ${showProfileMenu ? 'rotate-180' : ''}`}
                         />
                     </button>
 
-                    {/* Profile Dropdown Menu */}
                     <AnimatePresence>
                         {showProfileMenu && (
                             <motion.div
-                                initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                role="menu"
+                                initial={{ opacity: 0, y: 6, scale: 0.97 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                                transition={{ duration: 0.15, ease: 'easeOut' }}
-                                className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-[var(--surface)] border border-[var(--border)] shadow-2xl overflow-hidden z-50"
-                                style={{ boxShadow: '0 20px 50px rgba(0, 0, 0, 0.25)' }}
+                                exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                                transition={{ duration: 0.14, ease: 'easeOut' }}
+                                className="topbar-menu"
                             >
-                                {/* User Info */}
-                                <div className="p-4 border-b border-[var(--border)] bg-gradient-to-br from-[var(--primary)]/10 to-transparent">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--primary)]/70 flex items-center justify-center shadow-lg">
-                                            <span className="text-white font-semibold text-lg">{user?.name?.charAt(0).toUpperCase() || 'A'}</span>
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-[var(--foreground)]">{user?.name || 'Admin User'}</p>
-                                            <p className="text-sm text-[var(--foreground-secondary)]">{user?.email || 'admin@delito.com'}</p>
-                                        </div>
+                                <div className="topbar-menu-head">
+                                    <span className="topbar-avatar topbar-avatar-lg">{initial}</span>
+                                    <div className="min-w-0">
+                                        <p className="topbar-menu-name">{user?.name || 'Admin'}</p>
+                                        <p className="topbar-menu-email">{user?.email || '—'}</p>
+                                        <span className="topbar-menu-role">{roleLabel}</span>
                                     </div>
                                 </div>
 
-                                {/* Menu Items */}
-                                <div className="p-2">
-                                    <button
-                                        onClick={() => {
-                                            setShowProfileMenu(false);
-                                            window.location.href = '/settings';
-                                        }}
-                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] transition-colors"
-                                    >
-                                        <User size={18} />
-                                        <span>My Profile</span>
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setShowProfileMenu(false);
-                                            window.location.href = '/settings';
-                                        }}
-                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--foreground-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] transition-colors"
-                                    >
-                                        <Settings size={18} />
+                                <div className="topbar-menu-group">
+                                    <Link href="/settings" role="menuitem" className="topbar-menu-item">
+                                        <Settings size={16} />
                                         <span>Settings</span>
-                                    </button>
+                                    </Link>
                                 </div>
 
-                                {/* Logout */}
-                                <div className="p-2 border-t border-[var(--border)]">
+                                <div className="topbar-menu-group">
                                     <button
+                                        type="button"
+                                        role="menuitem"
                                         onClick={() => {
                                             setShowProfileMenu(false);
                                             logout();
                                         }}
-                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-500 hover:bg-red-500/10 transition-colors"
+                                        className="topbar-menu-item is-danger"
                                     >
-                                        <LogOut size={18} />
-                                        <span>Sign Out</span>
+                                        <LogOut size={16} />
+                                        <span>Sign out</span>
                                     </button>
                                 </div>
                             </motion.div>

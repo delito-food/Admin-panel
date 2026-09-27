@@ -349,6 +349,20 @@ async function handleGET(request: Request) {
                 vendorGstOnPlatformCut: data.vendorGstOnPlatformCut || 0,
                 vendorTotalDeduction: data.vendorTotalDeduction || 0,
                 vendorEarning: data.vendorEarning || 0,
+                // ── Price build-up, so the order screen can show every step ──
+                technologyServiceFee: data.technologyServiceFee || 0,
+                codCharges: data.codCharges || 0,
+                deliveryFeeBeforeDiscount: data.deliveryFeeBeforeDiscount || 0,
+                isFreeDeliveryOffer: data.isFreeDeliveryOffer === true,
+                deliveryPersonEarnings: data.deliveryPersonEarnings || 0,
+                gstOnFood: data.gstOnFood || 0,
+                gstOnServices: data.gstOnServices || 0,
+                campaignTitle: data.campaignTitle || '',
+                campaignDiscount: data.campaignDiscount || 0,
+                campaignVendorFunded: data.campaignVendorFunded || 0,
+                campaignPlatformFunded: data.campaignPlatformFunded || 0,
+                hungerGameTotalDiscount: data.hungerGameDiscount || 0,
+                hungerGameLevel2DeliveryDiscount: data.hungerGameLevel2DeliveryDiscount || 0,
             };
         });
 

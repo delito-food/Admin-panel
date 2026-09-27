@@ -11,7 +11,6 @@ import {
     AlertCircle,
     User,
     CheckCircle2,
-    Sparkles,
     ArrowRight,
     Shield,
     Zap,
@@ -153,9 +152,10 @@ export default function LoginPage() {
                             alignItems: 'center',
                             justifyContent: 'center',
                         }}>
-                            <Sparkles size={24} color="white" />
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/delito-mark.png" alt="Delito" width={40} height={40} style={{ display: 'block' }} />
                         </div>
-                        <span style={{ color: 'white', fontSize: '24px', fontWeight: 700 }}>Delito</span>
+                        <span style={{ color: 'white', fontSize: '24px', fontWeight: 700 }}>Sangyaan</span>
                     </motion.div>
 
                     {/* Main content */}
@@ -174,7 +174,7 @@ export default function LoginPage() {
                             marginBottom: '24px',
                         }}>
                             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981' }} />
-                            <span style={{ color: 'white', fontSize: '14px', fontWeight: 500 }}>Admin Dashboard</span>
+                            <span style={{ color: 'white', fontSize: '14px', fontWeight: 500 }}>Delito Admin Panel</span>
                         </div>
 
                         <h1 style={{
@@ -292,15 +292,14 @@ export default function LoginPage() {
                                 width: '44px',
                                 height: '44px',
                                 borderRadius: '12px',
-                                background: 'var(--gradient-primary)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                boxShadow: 'var(--shadow-glow)',
                             }}>
-                                <Sparkles size={22} color="white" />
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/delito-mark.png" alt="Delito" width={44} height={44} style={{ display: 'block' }} />
                             </div>
-                            <span style={{ fontSize: '20px', fontWeight: 700, color: 'var(--foreground)' }}>Delito</span>
+                            <span style={{ fontSize: '20px', fontWeight: 700, color: 'var(--foreground)' }}>Sangyaan</span>
                         </div>
                     </div>
 

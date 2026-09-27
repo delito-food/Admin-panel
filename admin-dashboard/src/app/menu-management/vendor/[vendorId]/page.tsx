@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, use } from 'react';
+import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Search, Filter, Plus, Edit3, Trash2, CheckCircle, XCircle, Clock,
-    Store, X, ImageIcon, Loader2, ArrowLeft, Image as ImageIcon2, UtensilsCrossed, Tag, DollarSign, Layers, Package, FileSpreadsheet, Zap
+    Filter, Plus, Trash2, CheckCircle, XCircle, Clock,
+    Store, X, ImageIcon, Loader2, ArrowLeft, Image as ImageIcon2, UtensilsCrossed, Tag, DollarSign, Layers, Package, FileSpreadsheet, Zap,
+    IndianRupee, FolderTree, RefreshCw
 } from 'lucide-react';
 import CsvImport from './CsvImport';
 import QuickAdd from './QuickAdd';
 import BulkImageUpload from './BulkImageUpload';
+import CatalogView from './CatalogView';
+import PriceManager from './PriceManager';
+import CategoryManager from './CategoryManager';
 import { useRouter } from 'next/navigation';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -32,10 +36,18 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
     const [categories, setCategories] = useState<VendorCategory[]>([]);
     const [vendor, setVendor] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'items' | 'categories'>('items');
-    
-    // UI state
-    const [searchQuery, setSearchQuery] = useState('');
+    // Deep link: /menu-management/vendor/<id>?tab=pricing | categories.
+    // Safe to read in the initializer: tabs only render after the client-side
+    // data load, so server and first client markup are both the loader.
+    const [activeTab, setActiveTab] = useState<'items' | 'categories' | 'pricing'>(() => {
+        if (typeof window === 'undefined') return 'items';
+        const t = new URLSearchParams(window.location.search).get('tab');
+        return t === 'pricing' || t === 'categories' ? t : 'items';
+    });
+    const [refreshing, setRefreshing] = useState(false);
+    const [pricingDirty, setPricingDirty] = useState(false);
+    const [categoryOrderDirty, setCategoryOrderDirty] = useState(false);
+    const firstLoad = useRef(true);
     
     // Modal states
     const [itemModal, setItemModal] = useState<{ open: boolean; item: AdminMenuItem | null }>({ open: false, item: null });
@@ -60,22 +72,29 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
     const [itemForm, setItemForm] = useState<Partial<AdminMenuItem>>({});
     const [categoryForm, setCategoryForm] = useState<Partial<VendorCategory>>({});
 
+    // First call shows the full-page loader and loads vendor info; later calls
+    // (after saves) refresh items + categories quietly so open tabs keep their
+    // state (filters, page, unsaved price drafts).
     const fetchData = useCallback(async () => {
+        const isFirst = firstLoad.current;
         try {
-            setLoading(true);
+            if (isFirst) setLoading(true);
+            else setRefreshing(true);
             
-            // Fetch vendor details
-            try {
-                const vRes = await fetch(`/api/vendors`);
-                if (vRes.ok) {
-                    const vData = await vRes.json();
-                    if (vData.success) {
-                        const foundVendor = vData.data.find((v: any) => v.vendorId === vendorId);
-                        if (foundVendor) setVendor(foundVendor);
+            // Fetch vendor details (once)
+            if (isFirst) {
+                try {
+                    const vRes = await fetch(`/api/vendors`);
+                    if (vRes.ok) {
+                        const vData = await vRes.json();
+                        if (vData.success) {
+                            const foundVendor = vData.data.find((v: any) => v.vendorId === vendorId);
+                            if (foundVendor) setVendor(foundVendor);
+                        }
                     }
+                } catch (e) {
+                    console.log('Could not fetch vendor info directly');
                 }
-            } catch (e) {
-                console.log('Could not fetch vendor info directly');
             }
 
             const [itemsRes, catRes] = await Promise.all([
@@ -91,9 +110,11 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
             
         } catch (error) {
             console.error('Fetch error:', error);
-            alert('Failed to load data');
+            if (isFirst) alert('Failed to load data');
         } finally {
+            firstLoad.current = false;
             setLoading(false);
+            setRefreshing(false);
         }
     }, [vendorId]);
 
@@ -256,11 +277,6 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
         }
     };
 
-    const filteredItems = items.filter(item => 
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        item.categoryName.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
     const openItemModal = (item?: AdminMenuItem) => {
         if (item) {
             setItemForm({ ...item });
@@ -331,142 +347,92 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-[var(--border)] gap-6">
-                <button 
-                    onClick={() => setActiveTab('items')} 
-                    className={`pb-3 font-semibold text-sm transition-colors relative ${activeTab === 'items' ? 'text-[var(--primary)]' : 'text-[var(--foreground-secondary)]'}`}
-                >
-                    Menu Items
-                    {activeTab === 'items' && <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary)] rounded-t-full" />}
-                </button>
-                <button 
-                    onClick={() => setActiveTab('categories')} 
-                    className={`pb-3 font-semibold text-sm transition-colors relative ${activeTab === 'categories' ? 'text-[var(--primary)]' : 'text-[var(--foreground-secondary)]'}`}
-                >
-                    Categories
-                    {activeTab === 'categories' && <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary)] rounded-t-full" />}
+            <div className="flex items-end border-b border-[var(--border)] gap-6 overflow-x-auto">
+                {([
+                    { key: 'items', label: 'Menu Items', icon: <UtensilsCrossed size={15} />, count: items.length, dot: false },
+                    { key: 'categories', label: 'Categories', icon: <FolderTree size={15} />, count: categories.length, dot: categoryOrderDirty },
+                    { key: 'pricing', label: 'Price Manager', icon: <IndianRupee size={15} />, count: null, dot: pricingDirty },
+                ] as const).map(t => (
+                    <button
+                        key={t.key}
+                        onClick={() => setActiveTab(t.key)}
+                        className={`pb-3 font-semibold text-sm transition-colors relative flex items-center gap-2 whitespace-nowrap shrink-0 ${activeTab === t.key ? 'text-[var(--primary)]' : 'text-[var(--foreground-secondary)]'}`}
+                    >
+                        {t.icon}
+                        {t.label}
+                        {t.count !== null && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--surface-hover)] text-[var(--foreground-secondary)]">{t.count}</span>
+                        )}
+                        {t.dot && <span title="Unsaved changes" className="w-2 h-2 rounded-full bg-amber-500" />}
+                        {activeTab === t.key && <motion.div layoutId="tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--primary)] rounded-t-full" />}
+                    </button>
+                ))}
+                <div className="flex-1" />
+                <button onClick={() => fetchData()} disabled={refreshing} className="pb-3 text-xs font-semibold text-[var(--foreground-secondary)] hover:text-[var(--primary)] flex items-center gap-1.5 whitespace-nowrap shrink-0" title="Reload items and categories">
+                    <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
                 </button>
             </div>
 
             {/* Actions Bar */}
-            <div className="flex flex-col sm:flex-row justify-between gap-4">
-                {activeTab === 'items' && (
-                    <div className="input-group max-w-md">
-                        <Search size={18} className="input-icon" />
-                        <input
-                            type="text"
-                            placeholder="Search items..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="input"
-                        />
-                    </div>
-                )}
-                <div className="flex-1" />
-                
-                {activeTab === 'items' ? (
-                    <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-                        <button onClick={() => setShowBulkImage(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
-                            <ImageIcon2 size={16} className="text-blue-500" /> <span className="hidden sm:inline font-bold">Bulk Images</span>
+            {activeTab !== 'pricing' && (
+                <div className="flex flex-col sm:flex-row justify-end gap-4">
+                    {activeTab === 'items' ? (
+                        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+                            <button onClick={() => setShowBulkImage(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
+                                <ImageIcon2 size={16} className="text-blue-500" /> <span className="hidden sm:inline font-bold">Bulk Images</span>
+                            </button>
+                            <button onClick={() => setShowCsvImport(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
+                                <FileSpreadsheet size={16} className="text-emerald-600" /> <span className="hidden sm:inline font-bold">Import CSV</span>
+                            </button>
+                            <button onClick={() => setShowQuickAdd(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
+                                <Zap size={16} className="text-amber-500" /> <span className="hidden sm:inline font-bold">Quick Add</span>
+                            </button>
+                            <button onClick={() => openItemModal()} className="btn btn-primary text-sm px-5 py-2.5 rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 flex items-center gap-2 font-bold flex-1 lg:flex-none justify-center">
+                                <Plus size={18} /> Add Item
+                            </button>
+                        </div>
+                    ) : (
+                        <button onClick={() => openCategoryModal()} className="btn btn-primary text-sm px-4 py-2 rounded-lg font-bold flex items-center gap-2">
+                            <Plus size={16} /> Add Category
                         </button>
-                        <button onClick={() => setShowCsvImport(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
-                            <FileSpreadsheet size={16} className="text-emerald-600" /> <span className="hidden sm:inline font-bold">Import CSV</span>
-                        </button>
-                        <button onClick={() => setShowQuickAdd(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
-                            <Zap size={16} className="text-amber-500" /> <span className="hidden sm:inline font-bold">Quick Add</span>
-                        </button>
-                        <button onClick={() => openItemModal()} className="btn btn-primary text-sm px-5 py-2.5 rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 flex items-center gap-2 font-bold flex-1 lg:flex-none justify-center">
-                            <Plus size={18} /> Add Item
-                        </button>
-                    </div>
-                ) : (
-                    <button onClick={() => openCategoryModal()} className="btn btn-primary text-sm px-4 py-2 rounded-lg font-bold flex items-center gap-2">
-                        <Plus size={16} /> Add Category
-                    </button>
-                )}
+                    )}
+                </div>
+            )}
+
+            {/* Tab panels stay mounted (hidden) so filters, pages, unsaved price
+                drafts and an unsaved category order survive tab switches. */}
+            <div style={{ display: activeTab === 'items' ? 'block' : 'none' }}>
+                <CatalogView
+                    vendorId={vendorId}
+                    items={items}
+                    categories={categories}
+                    onEdit={item => openItemModal(item)}
+                    onDelete={id => setDeleteModal({ open: true, type: 'item', id })}
+                    onChanged={fetchData}
+                />
             </div>
 
-            {/* Content Lists */}
-            {activeTab === 'items' && (
-                <div className="grid gap-3">
-                    {filteredItems.length === 0 ? (
-                        <div className="empty-state glass-card p-12 text-center">
-                            <UtensilsCrossed size={32} className="mx-auto text-[var(--foreground-secondary)] mb-4" />
-                            <h3 className="empty-state-title">No menu items found</h3>
-                        </div>
-                    ) : (
-                        filteredItems.map(item => (
-                            <div key={item.itemId} className="glass-card p-4 flex items-center gap-4">
-                                <div className="w-16 h-16 rounded-lg bg-[var(--surface-hover)] overflow-hidden shrink-0 flex items-center justify-center">
-                                    {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" /> : <ImageIcon2 size={20} className="text-[var(--foreground-secondary)]" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`w-3 h-3 rounded-sm border-[1.5px] flex items-center justify-center shrink-0 ${item.isVeg ? 'border-green-500' : 'border-red-500'}`}>
-                                            <div className={`w-1.5 h-1.5 rounded-full ${item.isVeg ? 'bg-green-500' : 'bg-red-500'}`} />
-                                        </div>
-                                        <h4 className="font-bold truncate">{item.name}</h4>
-                                        {item.isBestSeller && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200">Best Seller</span>}
-                                        {!item.imageUrl && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded border border-red-200 ml-2" title="Please edit this item to upload an image">Missing Image</span>}
-                                    </div>
-                                    <div className="flex items-center gap-3 mt-1 text-xs text-[var(--foreground-secondary)]">
-                                        <span className="font-bold text-[var(--foreground)]">₹{item.price}</span>
-                                        <span>•</span>
-                                        <span>{item.categoryName}</span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${item.isAvailable ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                        {item.isAvailable ? 'Available' : 'Unavailable'}
-                                    </span>
-                                    <button onClick={() => openItemModal(item)} className="p-2 hover:bg-[var(--surface-hover)] rounded-lg transition-colors text-blue-500">
-                                        <Edit3 size={18} />
-                                    </button>
-                                    <button onClick={() => setDeleteModal({ open: true, type: 'item', id: item.itemId })} className="p-2 hover:bg-[var(--surface-hover)] rounded-lg transition-colors text-red-500">
-                                        <Trash2 size={18} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
-            )}
+            <div style={{ display: activeTab === 'categories' ? 'block' : 'none' }}>
+                <CategoryManager
+                    vendorId={vendorId}
+                    categories={categories}
+                    items={items}
+                    onEdit={cat => openCategoryModal(cat)}
+                    onDelete={id => setDeleteModal({ open: true, type: 'category', id })}
+                    onChanged={fetchData}
+                    onDirtyChange={setCategoryOrderDirty}
+                />
+            </div>
 
-            {activeTab === 'categories' && (
-                <div className="grid gap-3">
-                    {categories.length === 0 ? (
-                        <div className="empty-state glass-card p-12 text-center">
-                            <h3 className="empty-state-title">No categories found</h3>
-                        </div>
-                    ) : (
-                        categories.map(cat => (
-                            <div key={cat.categoryId} className="glass-card p-4 flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-lg bg-[var(--surface-hover)] flex items-center justify-center font-bold text-[var(--foreground-secondary)]">
-                                        {cat.sortOrder}
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold">{cat.name}</h4>
-                                        <p className="text-xs text-[var(--foreground-secondary)]">{cat.description || 'No description'}</p>
-                                        <p className="text-xs text-[var(--primary)] font-medium mt-1">{items.filter(i => i.categoryId === cat.categoryId).length} item(s)</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cat.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                        {cat.isActive ? 'Active' : 'Inactive'}
-                                    </span>
-                                    <button onClick={() => openCategoryModal(cat)} className="p-2 hover:bg-[var(--surface-hover)] rounded-lg transition-colors text-blue-500">
-                                        <Edit3 size={18} />
-                                    </button>
-                                    <button onClick={() => setDeleteModal({ open: true, type: 'category', id: cat.categoryId })} className="p-2 hover:bg-[var(--surface-hover)] rounded-lg transition-colors text-red-500">
-                                        <Trash2 size={18} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
-            )}
+            <div style={{ display: activeTab === 'pricing' ? 'block' : 'none' }}>
+                <PriceManager
+                    vendorId={vendorId}
+                    items={items}
+                    categories={categories}
+                    onSaved={fetchData}
+                    onDirtyChange={setPricingDirty}
+                />
+            </div>
 
             {/* Modals */}
             <AnimatePresence>

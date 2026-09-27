@@ -2,11 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { SangyaanLoader, LOADER_TOTAL_MS } from './SangyaanLoader';
+import { StoryGiftButton } from './StoryGiftButton';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { patchGlobalFetch } from '@/lib/api-client';
+import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED, HEADER_HEIGHT, HEADER_HEIGHT_MOBILE } from './nav-config';
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -14,6 +17,15 @@ interface DashboardLayoutProps {
 
 function DashboardContent({ children }: DashboardLayoutProps) {
     const { user, isLoading } = useAuth();
+    // The loader holds for LOADER_TOTAL_MS on every full page load (open /
+    // refresh). In-app navigation never remounts this layout, so it won't
+    // replay when moving between pages.
+    const [introDone, setIntroDone] = useState(false);
+
+    useEffect(() => {
+        const t = window.setTimeout(() => setIntroDone(true), LOADER_TOTAL_MS);
+        return () => window.clearTimeout(t);
+    }, []);
     const pathname = usePathname();
     const router = useRouter();
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -25,6 +37,8 @@ function DashboardContent({ children }: DashboardLayoutProps) {
     }, []);
 
     const isLoginPage = pathname === '/login';
+    // The story page is a full-screen experience: no sidebar or top bar
+    const isFullscreenPage = pathname === '/story';
 
     useEffect(() => {
         const checkMobile = () => {
@@ -63,33 +77,17 @@ function DashboardContent({ children }: DashboardLayoutProps) {
         setSidebarCollapsed(prev => !prev);
     };
 
-    // Show loading state
-    if (isLoading) {
-        return (
-            <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
-                <div className="flex flex-col items-center gap-4">
-                    <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        className="w-10 h-10 border-3 border-[var(--primary)]/30 border-t-[var(--primary)] rounded-full"
-                    />
-                    <p className="text-[var(--foreground-secondary)]">Loading...</p>
-                </div>
-            </div>
-        );
-    }
+    const showLoader = isLoading || !introDone;
 
-    // If on login page, render without sidebar/header
-    if (isLoginPage) {
-        return <>{children}</>;
-    }
+    // The loader sits on top and fades out over whatever is ready underneath
+    const loader = (
+        <AnimatePresence>
+            {showLoader && <SangyaanLoader key="sangyaan-loader" />}
+        </AnimatePresence>
+    );
 
-    // If not authenticated and not on login page, show nothing (will redirect)
-    if (!user) {
-        return null;
-    }
-
-    return (
+    // App shell (sidebar + top bar + page) for a signed-in admin
+    const shell = (
         <div className="min-h-screen bg-[var(--background)]">
             {/* Mobile overlay backdrop when sidebar is open */}
             {isMobile && !sidebarCollapsed && (
@@ -108,17 +106,40 @@ function DashboardContent({ children }: DashboardLayoutProps) {
             <motion.main
                 initial={false}
                 animate={{
-                    marginLeft: isMobile ? 0 : (sidebarCollapsed ? 80 : 280),
+                    marginLeft: isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH),
                 }}
                 transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                 className="min-h-screen"
-                style={{ paddingTop: isMobile ? 76 : 96 }}
+                style={{ paddingTop: isMobile ? HEADER_HEIGHT_MOBILE : HEADER_HEIGHT }}
             >
-                <div style={{ padding: isMobile ? '20px 16px 24px 16px' : '32px 40px 40px 40px' }}>
+                <div style={{ padding: isMobile ? '16px 16px 24px' : '28px 32px 40px' }}>
                     {children}
                 </div>
             </motion.main>
+
+            {/* Gift in the bottom-left of the dashboard → our story */}
+            {pathname === '/' && (
+                <StoryGiftButton left={isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH)} />
+            )}
         </div>
+    );
+
+    // The loader keeps the same place in the tree in every state, so it is
+    // never remounted (and its rolling text never restarts) as auth settles.
+    let content: React.ReactNode = null;
+    if (isLoading) {
+        content = null;                 // still checking who is signed in
+    } else if (isLoginPage) {
+        content = children;             // login renders without sidebar/header
+    } else if (user) {
+        content = isFullscreenPage ? children : shell;
+    }                                   // else: not signed in, redirecting to /login
+
+    return (
+        <>
+            {loader}
+            {content}
+        </>
     );
 }
 

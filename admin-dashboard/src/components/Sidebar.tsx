@@ -3,465 +3,216 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronLeft } from 'lucide-react';
 import {
-    LayoutDashboard,
-    ShieldCheck,
-    Store,
-    Bike,
-    UtensilsCrossed,
-    Users,
-    ShoppingBag,
-    BarChart3,
-    Settings,
-    ChevronLeft,
-    ChevronDown,
-    Sparkles,
-    TrendingUp,
-    Percent,
-    DollarSign,
-    UserPlus,
-    Banknote,
-    LogOut,
-    MessageSquare,
-    RefreshCcw,
-    Wallet,
-    Gift,
-    Wifi,
-    ImageIcon,
-    Coins,
-    FileText,
-    AlertTriangle,
-    Bell,
-} from 'lucide-react';
-import { useAuth } from '@/lib/auth';
-
-interface NavItem {
-    label: string;
-    href?: string;
-    icon: React.ReactNode;
-    children?: { label: string; href: string }[];
-}
-
-const navigation: NavItem[] = [
-    {
-        label: 'Dashboard',
-        href: '/',
-        icon: <LayoutDashboard size={20} />,
-    },
-    {
-        label: 'Verification',
-        icon: <ShieldCheck size={20} />,
-        children: [
-            { label: 'Vendors', href: '/verification/vendors' },
-            { label: 'Outlet Photos', href: '/verification/shop-photos' },
-            { label: 'Delivery Partners', href: '/verification/delivery' },
-            { label: 'Documents', href: '/documents' },
-        ],
-    },
-    {
-        label: 'Menu Management',
-        href: '/menu-management',
-        icon: <UtensilsCrossed size={20} />,
-    },
-    {
-        label: 'Special Offers',
-        href: '/special-offers',
-        icon: <Sparkles size={20} />,
-    },
-    {
-        // Offers Delito co-funds with a restaurant. Separate from Special Offers, which
-        // are the restaurant's own and wholly theirs to pay for.
-        label: 'Co-funded Offers',
-        href: '/campaigns',
-        icon: <Sparkles size={20} />,
-    },
-    {
-        label: 'Hero Banners',
-        href: '/hero-banners',
-        icon: <ImageIcon size={20} />,
-    },
-    {
-        label: 'Push Notifications',
-        href: '/push-notifications',
-        icon: <Bell size={20} />,
-    },
-    {
-        label: 'Users',
-        icon: <Users size={20} />,
-        children: [
-            { label: 'Vendors', href: '/users/vendors' },
-            { label: 'Delivery Partners', href: '/users/delivery' },
-            { label: 'Customers', href: '/users/customers' },
-        ],
-    },
-    {
-        label: 'Vendors',
-        icon: <Store size={20} />,
-        children: [
-            { label: 'Performance', href: '/vendors/performance' },
-            { label: 'Commission', href: '/vendors/commission' },
-            { label: 'Commission Invoices', href: '/vendors/commission-invoices' },
-            { label: 'Payouts', href: '/vendors/payouts' },
-            { label: 'Business Hours', href: '/vendors/business-hours' },
-            { label: 'Online/Offline', href: '/vendors/status' },
-        ],
-    },
-    {
-        label: 'Delivery',
-        icon: <Bike size={20} />,
-        children: [
-            { label: 'Performance', href: '/delivery/performance' },
-            { label: 'COD Tracking', href: '/delivery/cod' },
-            { label: 'Payouts', href: '/delivery/payouts' },
-        ],
-    },
-    {
-        label: 'Payout Disputes',
-        href: '/payouts/disputes',
-        icon: <AlertTriangle size={20} />,
-    },
-    {
-        label: 'Orders',
-        icon: <ShoppingBag size={20} />,
-        children: [
-            { label: 'All Orders', href: '/orders' },
-            { label: 'Manual Assignment', href: '/orders/assignment' },
-            { label: 'Pending Refunds', href: '/orders/pending-refunds' },
-            { label: 'Refund History', href: '/orders/refunds' },
-            { label: 'Invoices', href: '/invoices' },
-        ],
-    },
-    {
-        label: 'Complaints',
-        href: '/complaints',
-        icon: <MessageSquare size={20} />,
-    },
-    {
-        label: 'Cashflow',
-        href: '/cashflow',
-        icon: <Wallet size={20} />,
-    },
-    {
-        label: 'Referral & Rewards',
-        href: '/referral-settings',
-        icon: <Gift size={20} />,
-    },
-    {
-        label: 'Coins',
-        href: '/coins',
-        icon: <Coins size={20} />,
-    },
-    {
-        label: 'Reports',
-        icon: <BarChart3 size={20} />,
-        children: [
-            { label: 'Overview', href: '/reports' },
-            { label: 'GST Report', href: '/reports/gst' },
-                            { label: 'TDS Report', href: '/reports/tds' },
-                            { label: 'HSN Summary', href: '/reports/hsn' },
-                            { label: 'Refund Report', href: '/reports/refunds' },
-                            { label: 'Advanced Analytics', href: '/reports/advanced' },
-        ],
-    },
-    {
-        label: 'Settings',
-        href: '/settings',
-        icon: <Settings size={20} />,
-    },
-];
+    NAV,
+    NAV_FOOTER,
+    SIDEBAR_WIDTH,
+    SIDEBAR_WIDTH_COLLAPSED,
+    findActive,
+    type NavSection,
+} from './nav-config';
 
 interface SidebarProps {
     collapsed: boolean;
     onToggle: () => void;
 }
 
+const STORAGE_KEY = 'delito-admin:sidebar-open-sections';
+
+function readStoredSections(): string[] {
+    try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function storeSections(ids: string[]) {
+    try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    } catch {
+        /* private mode / blocked storage — the sidebar still works */
+    }
+}
+
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     const pathname = usePathname();
-    const { user, logout } = useAuth();
-    const [expandedItems, setExpandedItems] = useState<string[]>(['Verification', 'Users', 'Vendors', 'Delivery', 'Orders', 'Reports', 'Menu Management', 'Special Offers', 'Referral & Rewards']);
+    const active = findActive(pathname);
+    const activeSectionId = active?.section.id;
 
-    const toggleExpanded = (label: string) => {
-        setExpandedItems(prev =>
-            prev.includes(label)
-                ? prev.filter(item => item !== label)
-                : [...prev, label]
+    const [openSections, setOpenSections] = useState<string[]>([]);
+
+    // Restore the sections the admin left open last time
+    useEffect(() => {
+        setOpenSections(readStoredSections());
+    }, []);
+
+    // Always reveal the section that owns the current page
+    useEffect(() => {
+        if (!activeSectionId) return;
+        setOpenSections((prev) => (prev.includes(activeSectionId) ? prev : [...prev, activeSectionId]));
+    }, [activeSectionId]);
+
+    const toggleSection = (id: string) => {
+        setOpenSections((prev) => {
+            const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+            storeSections(next);
+            return next;
+        });
+    };
+
+    // In the icon rail, clicking a group expands the sidebar with that group open
+    const openFromRail = (id: string) => {
+        setOpenSections((prev) => {
+            const next = prev.includes(id) ? prev : [...prev, id];
+            storeSections(next);
+            return next;
+        });
+        onToggle();
+    };
+
+    const renderSection = (section: NavSection) => {
+        const Icon = section.icon;
+        const isOwner = activeSectionId === section.id;
+
+        // Plain link (Dashboard, Settings)
+        if (section.href && !section.items) {
+            return (
+                <Link
+                    key={section.id}
+                    href={section.href}
+                    title={collapsed ? section.label : undefined}
+                    className={`sb-section-btn ${isOwner ? 'is-current' : ''}`}
+                >
+                    <span className="sb-section-icon"><Icon size={18} /></span>
+                    {!collapsed && <span className="sb-section-label">{section.label}</span>}
+                </Link>
+            );
+        }
+
+        const isOpen = openSections.includes(section.id);
+
+        if (collapsed) {
+            return (
+                <button
+                    key={section.id}
+                    type="button"
+                    title={section.label}
+                    onClick={() => openFromRail(section.id)}
+                    className={`sb-section-btn ${isOwner ? 'has-current' : ''}`}
+                >
+                    <span className="sb-section-icon"><Icon size={18} /></span>
+                </button>
+            );
+        }
+
+        return (
+            <div key={section.id} className="sb-section">
+                <button
+                    type="button"
+                    onClick={() => toggleSection(section.id)}
+                    aria-expanded={isOpen}
+                    className={`sb-section-btn ${isOwner ? 'has-current' : ''}`}
+                >
+                    <span className="sb-section-icon"><Icon size={18} /></span>
+                    <span className="sb-section-label">{section.label}</span>
+                    <motion.span
+                        className="sb-chevron"
+                        animate={{ rotate: isOpen ? 0 : -90 }}
+                        transition={{ duration: 0.18 }}
+                    >
+                        <ChevronDown size={15} />
+                    </motion.span>
+                </button>
+
+                <AnimatePresence initial={false}>
+                    {isOpen && section.items && (
+                        <motion.ul
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                            className="sb-links"
+                        >
+                            {section.items.map((item) => {
+                                const current = active?.href === item.href;
+                                return (
+                                    <li key={item.href}>
+                                        <Link
+                                            href={item.href}
+                                            aria-current={current ? 'page' : undefined}
+                                            className={`sb-link ${current ? 'is-current' : ''}`}
+                                        >
+                                            {item.label}
+                                        </Link>
+                                    </li>
+                                );
+                            })}
+                        </motion.ul>
+                    )}
+                </AnimatePresence>
+            </div>
         );
-    };
-
-    const isActive = (href?: string) => {
-        if (!href) return false;
-        if (href === '/') return pathname === '/';
-        return pathname.startsWith(href);
-    };
-
-    const isParentActive = (children?: { href: string }[]) => {
-        if (!children) return false;
-        return children.some(child => pathname.startsWith(child.href));
     };
 
     return (
         <motion.aside
             initial={false}
-            animate={{ width: collapsed ? 80 : 280 }}
+            animate={{ width: collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH }}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
             /* is-collapsed / is-open drive the off-canvas drawer behaviour on phones */
             className={`sidebar-premium ${collapsed ? 'is-collapsed' : 'is-open'}`}
         >
-            {/* Logo Section */}
-            <div className="sidebar-header">
-                <AnimatePresence mode="wait">
+            {/* Brand */}
+            <div className={`sb-brand ${collapsed ? 'is-collapsed' : ''}`}>
+                <Link href="/" className="sb-brand-link" title="Sangyaan">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/delito-mark.png" alt="Delito" width={36} height={36} className="sidebar-logo" />
                     {!collapsed && (
-                        <motion.div
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: -10 }}
-                            transition={{ duration: 0.2 }}
-                            className="flex items-center gap-3"
-                        >
-                            <div className="sidebar-logo">
-                                <Sparkles size={18} className="text-white" />
-                            </div>
-                            <div>
-                                <span className="font-bold text-lg text-[var(--foreground)]">Delito</span>
-                                <span className="block text-[10px] text-[var(--foreground-secondary)] uppercase tracking-wider">Admin Panel</span>
-                            </div>
-                        </motion.div>
+                        <span className="sb-brand-text">
+                            <span className="sb-brand-name">Sangyaan</span>
+                            <span className="sb-brand-sub">by Delito</span>
+                        </span>
                     )}
-                    {collapsed && (
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.8 }}
-                            className="sidebar-logo mx-auto"
-                        >
-                            <Sparkles size={18} className="text-white" />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
+                </Link>
                 <button
+                    type="button"
                     onClick={onToggle}
-                    className="sidebar-toggle"
+                    className="sb-collapse-btn"
+                    aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                    title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
-                    <motion.div
+                    <motion.span
                         animate={{ rotate: collapsed ? 180 : 0 }}
                         transition={{ duration: 0.3 }}
+                        className="flex"
                     >
-                        <ChevronLeft size={18} />
-                    </motion.div>
+                        <ChevronLeft size={16} />
+                    </motion.span>
                 </button>
             </div>
 
             {/* Navigation */}
-            <nav className="sidebar-nav">
-                <ul className="space-y-1">
-                    {navigation.map((item) => (
-                        <li key={item.label}>
-                            {item.href ? (
-                                <Link
-                                    href={item.href}
-                                    className={`sidebar-nav-item ${isActive(item.href) ? 'active' : ''}`}
-                                >
-                                    <div className={`sidebar-nav-icon ${isActive(item.href) ? 'active' : ''}`}>
-                                        {item.icon}
-                                    </div>
-                                    <AnimatePresence mode="wait">
-                                        {!collapsed && (
-                                            <motion.span
-                                                initial={{ opacity: 0, width: 0 }}
-                                                animate={{ opacity: 1, width: 'auto' }}
-                                                exit={{ opacity: 0, width: 0 }}
-                                                className="sidebar-nav-label"
-                                            >
-                                                {item.label}
-                                            </motion.span>
-                                        )}
-                                    </AnimatePresence>
-                                    {isActive(item.href) && !collapsed && (
-                                        <motion.div
-                                            layoutId="activeIndicator"
-                                            className="sidebar-active-indicator"
-                                        />
-                                    )}
-                                </Link>
-                            ) : (
-                                <div>
-                                    <button
-                                        onClick={() => toggleExpanded(item.label)}
-                                        className={`sidebar-nav-item ${isParentActive(item.children) ? 'parent-active' : ''}`}
-                                    >
-                                        <div className={`sidebar-nav-icon ${isParentActive(item.children) ? 'active' : ''}`}>
-                                            {item.icon}
-                                        </div>
-                                        <AnimatePresence mode="wait">
-                                            {!collapsed && (
-                                                <motion.div
-                                                    initial={{ opacity: 0 }}
-                                                    animate={{ opacity: 1 }}
-                                                    exit={{ opacity: 0 }}
-                                                    className="flex-1 flex items-center justify-between"
-                                                >
-                                                    <span className="sidebar-nav-label">{item.label}</span>
-                                                    <motion.div
-                                                        animate={{ rotate: expandedItems.includes(item.label) ? 180 : 0 }}
-                                                        transition={{ duration: 0.2 }}
-                                                        className="text-[var(--foreground-secondary)]"
-                                                    >
-                                                        <ChevronDown size={16} />
-                                                    </motion.div>
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </button>
-
-                                    <AnimatePresence>
-                                        {!collapsed && expandedItems.includes(item.label) && item.children && (
-                                            <motion.ul
-                                                initial={{ height: 0, opacity: 0 }}
-                                                animate={{ height: 'auto', opacity: 1 }}
-                                                exit={{ height: 0, opacity: 0 }}
-                                                transition={{ duration: 0.2 }}
-                                                className="sidebar-submenu"
-                                            >
-                                                {item.children.map((child) => (
-                                                    <li key={child.href}>
-                                                        <Link
-                                                            href={child.href}
-                                                            className={`sidebar-submenu-item ${isActive(child.href) ? 'active' : ''}`}
-                                                        >
-                                                            <span className="sidebar-submenu-dot" />
-                                                            {child.label}
-                                                        </Link>
-                                                    </li>
-                                                ))}
-                                            </motion.ul>
-                                        )}
-                                    </AnimatePresence>
-                                </div>
-                            )}
-                        </li>
-                    ))}
-                </ul>
+            <nav className="sb-nav" aria-label="Main">
+                {NAV.map((category, i) => (
+                    <div key={category.caption ?? `top-${i}`} className="sb-category">
+                        {category.caption && (
+                            collapsed
+                                ? <div className="sb-category-rule" aria-hidden />
+                                : <div className="sb-category-caption">{category.caption}</div>
+                        )}
+                        {category.sections.map(renderSection)}
+                    </div>
+                ))}
             </nav>
 
-            {/* Footer */}
-            <div className="sidebar-footer" style={{ paddingTop: '16px' }}>
-                <AnimatePresence mode="wait">
-                    {!collapsed ? (
-                        <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="space-y-4"
-                        >
-                            {/* User info card */}
-                            <div
-                                className="flex items-center gap-3 px-3 py-3 rounded-xl"
-                                style={{
-                                    background: 'var(--glass-bg)',
-                                    border: '1px solid var(--border)',
-                                    backdropFilter: 'blur(10px)',
-                                }}
-                            >
-                                <div
-                                    className="w-10 h-10 rounded-xl flex items-center justify-center"
-                                    style={{
-                                        background: 'var(--gradient-primary)',
-                                        boxShadow: 'var(--shadow-glow)',
-                                    }}
-                                >
-                                    <span className="text-white font-bold text-sm">{user?.name?.charAt(0).toUpperCase() || 'A'}</span>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-[var(--foreground)] truncate">{user?.name || 'Admin'}</p>
-                                    <p className="text-xs text-[var(--foreground-secondary)] truncate">{user?.email || 'admin@delito.com'}</p>
-                                </div>
-                            </div>
-
-                            {/* Logout button */}
-                            <button
-                                onClick={logout}
-                                className="group w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl transition-all duration-300"
-                                style={{
-                                    background: 'linear-gradient(135deg, rgba(233, 25, 12, 0.08) 0%, rgba(233, 25, 12, 0.04) 100%)',
-                                    border: '1px solid rgba(233, 25, 12, 0.2)',
-                                    marginTop: '8px',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(233, 25, 12, 0.15) 0%, rgba(233, 25, 12, 0.08) 100%)';
-                                    e.currentTarget.style.borderColor = 'rgba(233, 25, 12, 0.4)';
-                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(233, 25, 12, 0.15)';
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(233, 25, 12, 0.08) 0%, rgba(233, 25, 12, 0.04) 100%)';
-                                    e.currentTarget.style.borderColor = 'rgba(233, 25, 12, 0.2)';
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = 'none';
-                                }}
-                            >
-                                <LogOut size={18} style={{ color: 'var(--accent-error)' }} />
-                                <span className="text-sm font-semibold" style={{ color: 'var(--accent-error)' }}>Sign Out</span>
-                            </button>
-
-                            {/* Divider */}
-                            <div style={{
-                                height: '1px',
-                                background: 'var(--border)',
-                                margin: '8px 0',
-                                opacity: 0.5,
-                            }} />
-
-                            <div className="sidebar-version">
-                                <div className="sidebar-version-badge">v1.0.0</div>
-                                <span>Delito Admin</span>
-                            </div>
-                        </motion.div>
-                    ) : (
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.8 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.8 }}
-                            className="flex flex-col items-center gap-3"
-                        >
-                            {/* User avatar */}
-                            <div
-                                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                                style={{
-                                    background: 'var(--gradient-primary)',
-                                    boxShadow: 'var(--shadow-glow)',
-                                }}
-                                title={user?.name || 'Admin'}
-                            >
-                                <span className="text-white font-bold text-sm">{user?.name?.charAt(0).toUpperCase() || 'A'}</span>
-                            </div>
-
-                            {/* Logout button */}
-                            <button
-                                onClick={logout}
-                                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200"
-                                style={{
-                                    background: 'rgba(233, 25, 12, 0.08)',
-                                    border: '1px solid rgba(233, 25, 12, 0.15)',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.background = 'rgba(233, 25, 12, 0.15)';
-                                    e.currentTarget.style.borderColor = 'rgba(233, 25, 12, 0.3)';
-                                    e.currentTarget.style.transform = 'scale(1.05)';
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.background = 'rgba(233, 25, 12, 0.08)';
-                                    e.currentTarget.style.borderColor = 'rgba(233, 25, 12, 0.15)';
-                                    e.currentTarget.style.transform = 'scale(1)';
-                                }}
-                                title="Sign Out"
-                            >
-                                <LogOut size={18} style={{ color: 'var(--accent-error)' }} />
-                            </button>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+            {/* Pinned footer */}
+            <div className="sb-footer">
+                {renderSection(NAV_FOOTER)}
             </div>
         </motion.aside>
     );
