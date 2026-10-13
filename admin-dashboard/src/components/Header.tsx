@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ThemeToggle } from './ThemeToggle';
 import { Notifications } from './Notifications';
-import { Bell, Menu, LogOut, ChevronDown, ChevronRight, Settings } from 'lucide-react';
+import { Bell, Menu, LogOut, ChevronDown, ChevronRight, Settings, MonitorSmartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
 import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED, findActive } from './nav-config';
@@ -162,6 +162,10 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
                                     <Link href="/settings" role="menuitem" className="topbar-menu-item">
                                         <Settings size={16} />
                                         <span>Settings</span>
+                                    </Link>
+                                    <Link href="/settings?tab=security" role="menuitem" className="topbar-menu-item">
+                                        <MonitorSmartphone size={16} />
+                                        <span>Login activity</span>
                                     </Link>
                                 </div>
 

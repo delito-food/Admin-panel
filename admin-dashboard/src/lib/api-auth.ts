@@ -17,6 +17,8 @@ export interface AuthResult {
     authenticated: boolean;
     uid?: string;
     email?: string;
+    /** Token's auth_time (epoch seconds) — when the user actually signed in. */
+    authTime?: number;
     error?: string;
 }
 
@@ -64,6 +66,7 @@ export async function verifyApiAuth(request: Request): Promise<AuthResult> {
             authenticated: true,
             uid: decodedToken.uid,
             email: decodedToken.email,
+            authTime: decodedToken.auth_time,
         };
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -220,6 +223,14 @@ export function forbiddenResponse(message?: string) {
     return new Response(
         JSON.stringify({ success: false, error: message || 'Admin access required' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+}
+
+/** 401 — this device was signed out from Login activity. The client signs itself out on seeing the code. */
+export function sessionRevokedResponse() {
+    return new Response(
+        JSON.stringify({ success: false, error: 'This session was signed out', code: 'SESSION_REVOKED' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
     );
 }
 

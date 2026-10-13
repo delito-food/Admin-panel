@@ -21,6 +21,7 @@ import {
     AlertTriangle
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { takeSignOutReason } from '@/lib/admin-session-client';
 
 export default function LoginPage() {
     const { user, login, isConfigured } = useAuth();
@@ -38,6 +39,13 @@ export default function LoginPage() {
             router.push('/');
         }
     }, [user, router]);
+
+    // This device was signed out from Settings → Security on another device
+    useEffect(() => {
+        if (takeSignOutReason() === 'revoked') {
+            setError('This device was signed out from another session. Sign in again to continue.');
+        }
+    }, []);
 
     const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 

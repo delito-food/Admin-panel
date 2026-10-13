@@ -186,6 +186,14 @@ export const auth = {
             throw new Error('Firebase not initialized.');
         }
         return authInstance.verifyIdToken(token);
+    },
+    /** Invalidate every refresh token for this user — signs them out on all devices. */
+    revokeRefreshTokens: async (uid: string) => {
+        const authInstance = getAuthInstance();
+        if (!authInstance) {
+            throw new Error('Firebase not initialized.');
+        }
+        return authInstance.revokeRefreshTokens(uid);
     }
 };
 

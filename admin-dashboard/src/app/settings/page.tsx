@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Save, DollarSign, Truck, Package, Settings as SettingsIcon, Bell, Shield, Database, Loader2, CheckCircle, MapPin } from 'lucide-react';
+import { LoginActivity } from '@/components/LoginActivity';
 
 const fld: React.CSSProperties = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--foreground)', fontSize: '0.85rem', outline: 'none' };
 
@@ -12,6 +13,14 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<TabId>('platform');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+
+    // Deep link: /settings?tab=security opens Login activity directly
+    useEffect(() => {
+        const tab = new URLSearchParams(window.location.search).get('tab');
+        if (tab === 'platform' || tab === 'notifications' || tab === 'security' || tab === 'database') {
+            setActiveTab(tab);
+        }
+    }, []);
 
     const [platformSettings, setPlatformSettings] = useState({
         platformCommission: 15, minOrderAmount: 100, deliveryFeeDistance: 5,
@@ -34,7 +43,7 @@ export default function SettingsPage() {
     const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
         { id: 'platform', label: 'Platform', icon: SettingsIcon },
         { id: 'notifications', label: 'Notifications', icon: Bell },
-        { id: 'security', label: 'Security', icon: Shield },
+        { id: 'security', label: 'Security & Logins', icon: Shield },
         { id: 'database', label: 'Database', icon: Database },
     ];
 
@@ -82,13 +91,13 @@ export default function SettingsPage() {
                                 <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
                                     {activeTab === 'platform' && 'Platform Settings'}
                                     {activeTab === 'notifications' && 'Notification Settings'}
-                                    {activeTab === 'security' && 'Security Settings'}
+                                    {activeTab === 'security' && 'Login Activity'}
                                     {activeTab === 'database' && 'Database Settings'}
                                 </h2>
                                 <p style={{ fontSize: '0.78rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>
                                     {activeTab === 'platform' && 'Configure commission rates, delivery fees, and order limits'}
                                     {activeTab === 'notifications' && 'Configure alerts and email preferences'}
-                                    {activeTab === 'security' && 'Manage access and authentication settings'}
+                                    {activeTab === 'security' && 'Where your account is signed in — sign out any device'}
                                     {activeTab === 'database' && 'Firebase configuration and data management'}
                                 </p>
                             </div>
@@ -163,15 +172,7 @@ export default function SettingsPage() {
                         )}
 
                         {/* Security Tab */}
-                        {activeTab === 'security' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 12 }}>
-                                <div style={{ width: 60, height: 60, borderRadius: 16, background: 'rgba(16,185,129,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Shield size={28} color="#10B981" />
-                                </div>
-                                <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--foreground)' }}>Coming Soon</p>
-                                <p style={{ fontSize: '0.82rem', color: 'var(--foreground-secondary)', textAlign: 'center' }}>Two-factor authentication, session management, and more</p>
-                            </div>
-                        )}
+                        {activeTab === 'security' && <LoginActivity />}
 
                         {/* Database Tab */}
                         {activeTab === 'database' && (
@@ -184,7 +185,8 @@ export default function SettingsPage() {
                             </div>
                         )}
 
-                        {/* Save Button */}
+                        {/* Save Button (Login activity acts immediately, so none there) */}
+                        {activeTab !== 'security' && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
                             <AnimatePresence>
                                 {saved && (
@@ -200,6 +202,7 @@ export default function SettingsPage() {
                                 {saving ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <><Save size={16} /> Save Changes</>}
                             </button>
                         </div>
+                        )}
                     </motion.div>
                 </AnimatePresence>
             </div>

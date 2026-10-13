@@ -16,7 +16,13 @@
  * issued a document — handlers that don't care simply omit it.
  */
 
-import { requireAdmin, unauthorizedResponse, forbiddenResponse, type AdminResult } from './api-auth';
+import { requireAdmin, unauthorizedResponse, forbiddenResponse, sessionRevokedResponse, type AdminResult } from './api-auth';
+import { isCallerSessionRevoked } from './admin-sessions';
+
+export interface GuardOptions {
+    /** Skip the per-device session check (only for registering / ending a session). */
+    skipSessionCheck?: boolean;
+}
 
 type GuardedHandler<Req extends Request, Ctx> = (
     request: Req,
@@ -29,9 +35,11 @@ type GuardedHandler<Req extends Request, Ctx> = (
  *
  * 401 — token missing, malformed, or not verifiable against this project.
  * 403 — token is valid, but the user is not an admin.
+ * 401 SESSION_REVOKED — this device was signed out from Settings → Security.
  */
 export function withAdmin<Req extends Request = Request, Ctx = unknown>(
-    handler: GuardedHandler<Req, Ctx>
+    handler: GuardedHandler<Req, Ctx>,
+    options: GuardOptions = {}
 ) {
     return async function guarded(request: Req, context: Ctx): Promise<Response> {
         const result = await requireAdmin(request);
@@ -41,6 +49,9 @@ export function withAdmin<Req extends Request = Request, Ctx = unknown>(
         }
         if (!result.isAdmin) {
             return forbiddenResponse();
+        }
+        if (await isCallerSessionRevoked(request, result, options)) {
+            return sessionRevokedResponse();
         }
 
         return handler(request, context, result);

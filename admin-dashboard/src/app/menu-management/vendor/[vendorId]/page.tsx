@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Filter, Plus, Trash2, CheckCircle, XCircle, Clock,
     Store, X, ImageIcon, Loader2, ArrowLeft, Image as ImageIcon2, UtensilsCrossed, Tag, DollarSign, Layers, Package, FileSpreadsheet, Zap,
-    IndianRupee, FolderTree, RefreshCw
+    IndianRupee, FolderTree, RefreshCw, Download
 } from 'lucide-react';
 import CsvImport from './CsvImport';
 import QuickAdd from './QuickAdd';
@@ -13,6 +13,7 @@ import BulkImageUpload from './BulkImageUpload';
 import CatalogView from './CatalogView';
 import PriceManager from './PriceManager';
 import CategoryManager from './CategoryManager';
+import { exportMenuCsv } from './exportMenuCsv';
 import { useRouter } from 'next/navigation';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -383,6 +384,17 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
                             </button>
                             <button onClick={() => setShowCsvImport(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
                                 <FileSpreadsheet size={16} className="text-emerald-600" /> <span className="hidden sm:inline font-bold">Import CSV</span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (items.length === 0) { showToast('No menu items to export'); return; }
+                                    const n = exportMenuCsv(items, categories, vendor?.shopName || vendor?.fullName || vendorId);
+                                    showToast(`Downloaded ${n} items as CSV`);
+                                }}
+                                title="Download all menu items with price, category, veg/non-veg, variants and add-ons"
+                                className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]"
+                            >
+                                <Download size={16} className="text-violet-500" /> <span className="hidden sm:inline font-bold">Export CSV</span>
                             </button>
                             <button onClick={() => setShowQuickAdd(true)} className="btn btn-outline text-sm px-4 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-xl transition-all shadow-sm hover:shadow flex items-center gap-2 text-[var(--foreground)]">
                                 <Zap size={16} className="text-amber-500" /> <span className="hidden sm:inline font-bold">Quick Add</span>

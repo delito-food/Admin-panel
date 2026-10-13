@@ -4,6 +4,7 @@
  */
 
 import { auth } from '@/lib/firebase';
+import { getSessionId, notifyIfSessionRevoked, SESSION_HEADER } from '@/lib/admin-session-client';
 
 export async function authenticatedFetch(
     url: string,
@@ -22,6 +23,11 @@ export async function authenticatedFetch(
         } catch (e) {
             console.warn('[authenticatedFetch] Failed to get ID token:', e);
         }
+    }
+
+    const sessionId = getSessionId();
+    if (sessionId && !headers.has(SESSION_HEADER)) {
+        headers.set(SESSION_HEADER, sessionId);
     }
 
     return fetch(url, { ...options, headers });
@@ -92,15 +98,26 @@ export function patchGlobalFetch() {
         // Only patch /api/* calls (our own backend)
         if (url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/')) {
             if (auth?.currentUser) {
+                let headers: Headers | null = null;
                 try {
                     const token = await auth.currentUser.getIdToken();
-                    const headers = new Headers(init?.headers);
+                    headers = new Headers(init?.headers);
                     if (!headers.has('Authorization')) {
                         headers.set('Authorization', `Bearer ${token}`);
                     }
-                    return originalFetch(input, { ...init, headers });
+                    // Which signed-in device this is, so the server can refuse
+                    // a device that was signed out from Login activity.
+                    const sessionId = getSessionId();
+                    if (sessionId && !headers.has(SESSION_HEADER)) {
+                        headers.set(SESSION_HEADER, sessionId);
+                    }
                 } catch {
-                    // Fall through to original fetch
+                    headers = null; // Fall through to original fetch
+                }
+                if (headers) {
+                    const res = await originalFetch(input, { ...init, headers });
+                    notifyIfSessionRevoked(res);
+                    return res;
                 }
             }
         }
