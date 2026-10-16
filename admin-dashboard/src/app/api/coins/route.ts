@@ -78,9 +78,9 @@ async function handleGET() {
             };
         }).sort((a, b) => b.coinBalance - a.coinBalance);
 
-        // 1 coin = ₹1 (standard)
-        const totalCoinValueINR = totalCoinsBalance;
-        const totalRedeemedValueINR = totalCoinsRedeemed;
+        // 10 coins = ₹1 — WalletConstants.COINS_PER_RUPEE in the customer app
+        const totalCoinValueINR = Math.round(totalCoinsBalance / 10);
+        const totalRedeemedValueINR = Math.round(totalCoinsRedeemed / 10);
 
         const summary = {
             totalCoinsOnPlatform: totalCoinsBalance,

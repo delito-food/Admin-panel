@@ -5,9 +5,10 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Coins, Search, RefreshCw, Loader2, Users, TrendingUp, TrendingDown,
-    Gift,
+    Gift, Plus, CheckCircle2,
 } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { AddCoinsDialog, type CoinCustomer } from './AddCoinsDialog';
 
 function fmt(n: any): string { const v = Number(n); return isNaN(v) ? '0' : v.toLocaleString('en-IN'); }
 
@@ -16,6 +17,8 @@ export default function CoinsPage() {
     const [search, setSearch] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState<'all' | 'active' | 'zero'>('all');
+    const [addCoins, setAddCoins] = useState<{ open: boolean; customer: CoinCustomer | null }>({ open: false, customer: null });
+    const [toast, setToast] = useState('');
 
     const handleRefresh = async () => { setRefreshing(true); await refetch(); setTimeout(() => setRefreshing(false), 400); };
 
@@ -40,9 +43,14 @@ export default function CoinsPage() {
                     <h1 className="page-title"><Coins size={28} style={{ color: '#F59E0B' }} /> Platform Coins</h1>
                     <p className="page-subtitle">Coin balances, earn/redeem tracking, and customer-wise details</p>
                 </div>
-                <button onClick={handleRefresh} className="btn btn-outline" disabled={refreshing}>
-                    <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} /> Refresh
-                </button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button onClick={() => setAddCoins({ open: true, customer: null })} className="btn btn-primary" disabled={loading}>
+                        <Plus size={16} /> Add coins
+                    </button>
+                    <button onClick={handleRefresh} className="btn btn-outline" disabled={refreshing}>
+                        <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} /> Refresh
+                    </button>
+                </div>
             </div>
 
             {loading ? (
@@ -73,14 +81,14 @@ export default function CoinsPage() {
 
                 {/* Customer Table */}
                 <div className="glass-card" style={{ overflow: 'auto' }}>
-                    <div style={{ minWidth: 900 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.6fr', padding: '10px 14px', background: 'var(--surface-hover)', borderBottom: '1px solid var(--glass-border)', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--foreground-secondary)' }}>
-                            <span>Customer</span><span style={{ textAlign: 'right' }}>Balance</span><span style={{ textAlign: 'right' }}>Earned</span><span style={{ textAlign: 'right' }}>Redeemed</span><span style={{ textAlign: 'right' }}>Disc. (₹)</span><span style={{ textAlign: 'center' }}>Orders w/ Coins</span><span style={{ textAlign: 'center' }}>Total Orders</span>
+                    <div style={{ minWidth: 1000 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.6fr 0.7fr', padding: '10px 14px', background: 'var(--surface-hover)', borderBottom: '1px solid var(--glass-border)', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--foreground-secondary)' }}>
+                            <span>Customer</span><span style={{ textAlign: 'right' }}>Balance</span><span style={{ textAlign: 'right' }}>Earned</span><span style={{ textAlign: 'right' }}>Redeemed</span><span style={{ textAlign: 'right' }}>Disc. (₹)</span><span style={{ textAlign: 'center' }}>Orders w/ Coins</span><span style={{ textAlign: 'center' }}>Total Orders</span><span style={{ textAlign: 'center' }}>Wallet</span>
                         </div>
                         {filtered.length === 0 ? (
                             <div style={{ padding: 30, textAlign: 'center', color: 'var(--foreground-secondary)' }}>No customers found</div>
                         ) : filtered.slice(0, 200).map((c: any, i: number) => (
-                            <motion.div key={c.customerId} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(i * 0.02, 0.5) }} style={{ display: 'grid', gridTemplateColumns: '1.8fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.6fr', padding: '10px 14px', borderBottom: '1px solid var(--glass-border)', fontSize: '0.82rem', background: i % 2 === 0 ? 'transparent' : 'var(--surface-hover)', alignItems: 'center' }}>
+                            <motion.div key={c.customerId} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(i * 0.02, 0.5) }} style={{ display: 'grid', gridTemplateColumns: '1.8fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.6fr 0.7fr', padding: '10px 14px', borderBottom: '1px solid var(--glass-border)', fontSize: '0.82rem', background: i % 2 === 0 ? 'transparent' : 'var(--surface-hover)', alignItems: 'center' }}>
                                 <div>
                                     <p style={{ fontWeight: 600, fontSize: '0.82rem' }}>{c.name || 'Customer'}</p>
                                     <p style={{ fontSize: '0.68rem', color: 'var(--foreground-secondary)' }}>{c.phone} {c.email ? `• ${c.email}` : ''}</p>
@@ -93,6 +101,15 @@ export default function CoinsPage() {
                                 <span style={{ textAlign: 'right' }}>₹{fmt(c.coinDiscount)}</span>
                                 <span style={{ textAlign: 'center' }}>{c.ordersWithCoins}</span>
                                 <span style={{ textAlign: 'center' }}>{c.totalOrders}</span>
+                                <span style={{ textAlign: 'center' }}>
+                                    <button
+                                        onClick={() => setAddCoins({ open: true, customer: c })}
+                                        title="Add coins to this customer's wallet"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.45)', background: 'rgba(245,158,11,0.08)', color: '#D97706', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer' }}
+                                    >
+                                        <Plus size={13} /> Add
+                                    </button>
+                                </span>
                             </motion.div>
                         ))}
                         {filtered.length > 200 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--foreground-secondary)', fontSize: '0.78rem' }}>Showing top 200 of {filtered.length} customers</div>}
@@ -103,13 +120,35 @@ export default function CoinsPage() {
                 <div className="glass-card" style={{ padding: '14px 18px', marginTop: 16, background: 'rgba(245,158,11,0.04)', border: '1px solid rgba(245,158,11,0.12)' }}>
                     <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#F59E0B', marginBottom: 6 }}>ℹ️ How Coins Work</p>
                     <div style={{ fontSize: '0.75rem', color: 'var(--foreground-secondary)', lineHeight: 1.7 }}>
-                        <p>• Customers earn coins via referrals (100 coins per successful referral)</p>
-                        <p>• 1 coin = ₹1 discount value</p>
-                        <p>• Coins are applied at checkout as a discount on orders</p>
-                        <p>• Platform liability = Total coins on platform × ₹1</p>
+                        <p>• Customers earn coins on delivered orders, ratings, referrals and admin credits (Add coins)</p>
+                        <p>• 10 coins = ₹1 discount value (same as the customer app)</p>
+                        <p>• Coins are applied at checkout, up to 20% of the order</p>
+                        <p>• Each credit can have its own expiry; unused coins are removed after it</p>
+                        <p>• Platform liability = Total coins on platform ÷ 10 (in ₹)</p>
                     </div>
                 </div>
             </>)}
+
+            {addCoins.open && (
+                <AddCoinsDialog
+                    customers={customers}
+                    initialCustomer={addCoins.customer}
+                    onClose={() => setAddCoins({ open: false, customer: null })}
+                    onDone={(msg) => {
+                        setAddCoins({ open: false, customer: null });
+                        setToast(msg);
+                        setTimeout(() => setToast(''), 5000);
+                        refetch();
+                    }}
+                />
+            )}
+
+            {toast && (
+                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                    style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 110, maxWidth: 'calc(100vw - 32px)', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 12, background: '#065F46', color: '#fff', fontSize: '0.82rem', fontWeight: 600, boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+                    <CheckCircle2 size={16} /> {toast}
+                </motion.div>
+            )}
         </div>
     );
 }
