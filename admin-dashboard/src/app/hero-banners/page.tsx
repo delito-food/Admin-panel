@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import {
     ImageIcon,
     Upload,
@@ -34,8 +34,12 @@ import {
     Palette,
     CheckCircle2,
     AlertCircle,
+    GripVertical,
+    Store,
 } from 'lucide-react';
 import HeroCanvasEditor from './HeroCanvasEditor';
+import VendorPicker, { findVendor, type VendorOption } from './VendorPicker';
+import SortableRow from './SortableRow';
 import {
     APP_GREEN,
     DEFAULT_FIT,
@@ -136,6 +140,17 @@ export default function HeroBannersPage() {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [dragOver, setDragOver] = useState(false);
 
+    // Vendors for the "Open a vendor" picker and for naming vendor links in the list.
+    const [vendors, setVendors] = useState<VendorOption[] | null>(null);
+    const [vendorsError, setVendorsError] = useState('');
+
+    // Drag-to-reorder: the latest list, and the order a drag started from.
+    const bannersRef = useRef<HeroBanner[]>([]);
+    const dragStartOrder = useRef('');
+    useEffect(() => {
+        bannersRef.current = banners;
+    }, [banners]);
+
     /* ── Data ─────────────────────────────────────────────────────────────── */
 
     const fetchData = useCallback(async () => {
@@ -166,6 +181,36 @@ export default function HeroBannersPage() {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch('/api/vendors');
+                const result = await res.json().catch(() => null);
+                if (!res.ok || !result?.success) {
+                    throw new Error(result?.error || `Request failed (${res.status})`);
+                }
+                const rows: Record<string, unknown>[] = Array.isArray(result.data) ? result.data : [];
+                const list: VendorOption[] = rows
+                    .map((v) => ({
+                        vendorId: String(v.vendorId || v.id || ''),
+                        shopName: String(v.shopName || v.fullName || ''),
+                        shopImageUrl: String(v.shopImageUrl || ''),
+                        city: String(v.city || ''),
+                        isOnline: v.isOnline === true,
+                        isVerified: v.isVerified === true,
+                    }))
+                    .filter((v) => v.vendorId);
+                if (!cancelled) setVendors(list);
+            } catch (err) {
+                if (!cancelled) setVendorsError(err instanceof Error ? err.message : 'Network error');
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const flash = (message: string) => {
         setToast(message);
@@ -234,7 +279,7 @@ export default function HeroBannersPage() {
             const res = await fetch('/api/hero-banners', {
                 method: isNew ? 'POST' : 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(draft),
+                body: JSON.stringify(isNew ? draft : { ...draft, sortOrder: undefined }),
             });
             const result = await res.json();
             if (!result.success) throw new Error(result.error || 'Save failed');
@@ -327,6 +372,34 @@ export default function HeroBannersPage() {
             },
             () => setBanners(before)
         );
+    };
+
+    /** Drag-to-reorder: save once when the drag ends, only if the order changed. */
+    const onRowDragStart = () => {
+        dragStartOrder.current = bannersRef.current.map((b) => b.id).join(',');
+    };
+
+    const onRowDragEnd = async () => {
+        const startIds = dragStartOrder.current;
+        dragStartOrder.current = '';
+        const current = bannersRef.current;
+        if (!startIds || current.map((b) => b.id).join(',') === startIds) return;
+
+        const before = startIds
+            .split(',')
+            .map((id) => current.find((b) => b.id === id))
+            .filter((b): b is HeroBanner => !!b);
+
+        const ok = await mutate(
+            '/api/hero-banners',
+            {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reorder: current.map((b) => b.id) }),
+            },
+            () => setBanners(before)
+        );
+        if (ok) flash('New order saved — the app shows banners in this order');
     };
 
     const saveConfig = async (changes: Partial<HeroConfig>) => {
@@ -581,11 +654,19 @@ export default function HeroBannersPage() {
                     artwork.
                 </div>
             ) : (
-                <div style={{ display: 'grid', gap: 12 }}>
+                <Reorder.Group
+                    as="div"
+                    axis="y"
+                    values={banners}
+                    onReorder={setBanners}
+                    style={{ display: 'grid', gap: 12 }}
+                >
                     {banners.map((banner, index) => (
-                        <motion.div
+                        <SortableRow
                             key={banner.id}
-                            layout
+                            value={banner}
+                            onDragStart={onRowDragStart}
+                            onDragEnd={onRowDragEnd}
                             style={{
                                 ...cardStyle,
                                 display: 'flex',
@@ -595,6 +676,29 @@ export default function HeroBannersPage() {
                                 opacity: banner.isActive ? 1 : 0.55,
                             }}
                         >
+                            {(startDrag) => (<>
+                            <button
+                                type="button"
+                                title="Drag to reorder"
+                                aria-label="Drag to reorder"
+                                onPointerDown={startDrag}
+                                style={{
+                                    alignSelf: 'stretch',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: 28,
+                                    marginLeft: -6,
+                                    border: 'none',
+                                    borderRadius: 8,
+                                    background: 'transparent',
+                                    color: 'var(--foreground-secondary)',
+                                    cursor: 'grab',
+                                    touchAction: 'none',
+                                }}
+                            >
+                                <GripVertical size={18} />
+                            </button>
                             {/* Thumbnail rendered with the real header bar above
                                 the real canvas outline, at the real fit */}
                             <div style={{ flexShrink: 0 }}>
@@ -674,6 +778,20 @@ export default function HeroBannersPage() {
                                         : ''}
                                     {banner.updatedBy ? ` · last edited by ${banner.updatedBy}` : ''}
                                 </div>
+                                {banner.linkType !== 'none' && (
+                                    <div
+                                        style={{
+                                            fontSize: '0.75rem',
+                                            color: 'var(--foreground-secondary)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 5,
+                                            flexWrap: 'wrap',
+                                        }}
+                                    >
+                                        {describeLink(banner, vendors)}
+                                    </div>
+                                )}
                             </div>
 
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -717,9 +835,10 @@ export default function HeroBannersPage() {
                                     <Trash2 size={15} />
                                 </IconAction>
                             </div>
-                        </motion.div>
+                            </>)}
+                        </SortableRow>
                     ))}
-                </div>
+                </Reorder.Group>
             )}
 
             {/* Editor modal */}
@@ -869,6 +988,9 @@ export default function HeroBannersPage() {
                                             setDraft({
                                                 ...draft,
                                                 linkType: e.target.value as HeroBanner['linkType'],
+                                                // A vendor ID isn't a valid URL (and vice versa) — start fresh on type change.
+                                                linkValue:
+                                                    e.target.value === draft.linkType ? draft.linkValue : '',
                                             })
                                         }
                                         style={inputStyle}
@@ -879,22 +1001,29 @@ export default function HeroBannersPage() {
                                         <option value="url">Open a link / app screen</option>
                                     </select>
                                 </Field>
-                                {draft.linkType !== 'none' && (
-                                    <Field
-                                        label={
-                                            draft.linkType === 'vendor'
-                                                ? 'Vendor ID or exact shop name'
-                                                : draft.linkType === 'category'
-                                                  ? 'Category name'
-                                                  : 'Link'
-                                        }
-                                    >
+                                {draft.linkType === 'vendor' && (
+                                    <Field label="Vendor">
+                                        <VendorPicker
+                                            vendors={vendors}
+                                            error={vendorsError}
+                                            value={draft.linkValue}
+                                            onChange={(vendorId) =>
+                                                setDraft({ ...draft, linkValue: vendorId })
+                                            }
+                                        />
+                                        <span style={{ fontSize: '0.7rem', color: draft.linkValue.trim() ? 'var(--foreground-secondary)' : '#D97706', lineHeight: 1.4 }}>
+                                            {draft.linkValue.trim()
+                                                ? 'Tapping the banner opens this restaurant’s page in the app.'
+                                                : 'Pick a restaurant — until then the banner won’t respond to taps.'}
+                                        </span>
+                                    </Field>
+                                )}
+                                {draft.linkType !== 'none' && draft.linkType !== 'vendor' && (
+                                    <Field label={draft.linkType === 'category' ? 'Category name' : 'Link'}>
                                         <input
                                             value={draft.linkValue}
                                             placeholder={
-                                                draft.linkType === 'vendor'
-                                                    ? 'e.g. 8fK2…xQ or Biryani House'
-                                                    : draft.linkType === 'category'
+                                                draft.linkType === 'category'
                                                       ? 'e.g. Biryani'
                                                       : 'https://… or app:wallet'
                                             }
@@ -904,9 +1033,7 @@ export default function HeroBannersPage() {
                                             style={inputStyle}
                                         />
                                         <span style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', lineHeight: 1.4 }}>
-                                            {draft.linkType === 'vendor'
-                                                ? 'Opens that restaurant. The ID is in Vendors → vendor page URL; an exact shop name also works.'
-                                                : draft.linkType === 'category'
+                                            {draft.linkType === 'category'
                                                   ? 'Opens search filtered to this category — use the same name as the home-screen category chip.'
                                                   : 'Web links open in an in-app browser. In-app screens: app:wallet, app:hungerGame, app:pocketeats, app:yourOrders, app:cart, app:profile, app:helpSupport, app:allRestaurants/all (or /trending, /toprated). tel:, mailto: and upi: links open the phone\u2019s app.'}
                                         </span>
@@ -1284,6 +1411,33 @@ function SwitchRow({
 }
 
 /* ── Date helpers ─────────────────────────────────────────────────────────── */
+
+/** "On tap → …" summary for a banner in the list. */
+function describeLink(
+    b: { linkType: string; linkValue: string },
+    vendors: VendorOption[] | null
+): React.ReactNode {
+    const value = b.linkValue.trim();
+    if (!value) {
+        return <span style={{ color: '#D97706' }}>On tap: not set — this banner isn’t tappable</span>;
+    }
+    if (b.linkType === 'vendor') {
+        if (!vendors) return <>On tap → <Store size={12} /> vendor</>;
+        const v = findVendor(vendors, value);
+        return v ? (
+            <>
+                On tap → <Store size={12} />
+                <b style={{ color: 'var(--foreground)' }}>{v.shopName || 'Unnamed vendor'}</b>
+                {v.city ? ` · ${v.city}` : ''}
+                {!v.isVerified && <span style={{ color: '#D97706' }}>(not verified)</span>}
+            </>
+        ) : (
+            <span style={{ color: '#EF4444' }}>On tap → vendor “{value}” not found — edit to pick one</span>
+        );
+    }
+    if (b.linkType === 'category') return <>On tap → category “{value}”</>;
+    return <>On tap → {value}</>;
+}
 
 function fmtDate(iso: string | null): string {
     if (!iso) return '—';
