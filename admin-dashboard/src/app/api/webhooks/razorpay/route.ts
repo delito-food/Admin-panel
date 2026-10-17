@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db, collections } from '@/lib/firebase-admin';
+import { db, collections, sendPushNotification } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import crypto from 'crypto';
 
@@ -343,11 +343,48 @@ async function handlePayoutProcessed(payload: any) {
             .get();
 
         if (!snapshot.empty) {
-            await snapshot.docs[0].ref.update({
+            const doc = snapshot.docs[0];
+            const wasCompleted = doc.data().status === 'completed';
+            await doc.ref.update({
                 status: 'completed',
                 razorpayPayoutStatus: payout.status,
                 completedAt: Timestamp.now(),
             });
+
+            // Payout received notification — the manual "confirm" path in
+            // /api/payouts already sends one; this covers payouts completed by
+            // Razorpay. Skipped on webhook retries for an already-completed payout.
+            if (!wasCompleted) {
+                try {
+                    const d = doc.data();
+                    const isVendor = collection === 'vendorPayouts';
+                    const recipientId = (isVendor ? d.vendorId : d.deliveryPersonId) as string | undefined;
+                    const amount = Number(d.amount) || payout.amount / 100;
+                    const amountText = `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    if (recipientId) {
+                        await db.collection('notifications').add({
+                            userId: recipientId,
+                            type: 'payout_received',
+                            title: '💰 Payment Received – Delito',
+                            body: `${amountText} has been credited to your account.`,
+                            payoutId: doc.id,
+                            amount,
+                            recipientType: isVendor ? 'vendor' : 'delivery',
+                            isRead: false,
+                            createdAt: Timestamp.now(),
+                        });
+                        await sendPushNotification(
+                            isVendor ? 'vendor' : 'delivery',
+                            recipientId,
+                            '💰 Payment Received – Delito',
+                            `${amountText} has been credited to your account.`,
+                            { type: 'payout_received', payoutId: doc.id, amount: String(amount) }
+                        );
+                    }
+                } catch (notifErr) {
+                    console.warn('Payout notification failed (non-fatal):', notifErr);
+                }
+            }
             break;
         }
     }
