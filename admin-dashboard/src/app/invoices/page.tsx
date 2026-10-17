@@ -42,7 +42,9 @@ export default function InvoicesPage() {
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
 
-    const statusFilters = ['All', 'Delivered', 'Pending', 'Accepted', 'Preparing', 'Picked Up', 'Cancelled'];
+    // Raw statuses as the apps write them. The vendor app writes Accepted and
+    // Prepared — "Preparing" is legacy and matched nothing on current orders.
+    const statusFilters = ['All', 'Delivered', 'Pending', 'Accepted', 'Prepared', 'Sent for delivery', 'Picked Up', 'Cancelled'];
 
     const handleRefresh = async () => {
         setRefreshing(true);
@@ -251,7 +253,9 @@ export default function InvoicesPage() {
             case 'Delivered': return { bg: 'rgba(16,185,129,0.1)', color: '#10B981', border: 'rgba(16,185,129,0.25)' };
             case 'Pending': return { bg: 'rgba(245,158,11,0.1)', color: '#F59E0B', border: 'rgba(245,158,11,0.25)' };
             case 'Cancelled': return { bg: 'rgba(239,68,68,0.1)', color: '#EF4444', border: 'rgba(239,68,68,0.25)' };
-            case 'Preparing': return { bg: 'rgba(59,130,246,0.1)', color: '#3B82F6', border: 'rgba(59,130,246,0.25)' };
+            case 'Preparing':
+            case 'Accepted':
+            case 'Prepared': return { bg: 'rgba(59,130,246,0.1)', color: '#3B82F6', border: 'rgba(59,130,246,0.25)' };
             default: return { bg: 'var(--surface-hover)', color: 'var(--foreground-secondary)', border: 'var(--glass-border)' };
         }
     };

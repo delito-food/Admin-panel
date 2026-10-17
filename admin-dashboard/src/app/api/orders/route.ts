@@ -8,6 +8,7 @@ import { reportResponse, platformMeta } from '@/lib/report-export';
 import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { withAdmin } from '@/lib/api-guard';
 import { computeOrderEconomics } from '@/lib/pricing-engine';
+import { customerStageOf, opsStageOf, promisedDeliveryMs, OPS_STAGE_META } from '@/lib/order-stage';
 
 async function handleGET(request: Request) {
     try {
@@ -124,7 +125,7 @@ async function handleGET(request: Request) {
         // of order ids, so it queries for exactly those tasks — chunked into
         // `in` filters of 30, which is Firestore's limit for that operator.
         const allOrderIdSet = new Set(orderIds);
-        const tasksByOrderId: Record<string, { deliveryPersonId: string; deliveryPersonName: string; deliveryPersonPhone: string; dispatchedAt: any; pickedUpAt: any; deliveredAt: any; taskStatus: string }> = {};
+        const tasksByOrderId: Record<string, { deliveryPersonId: string; deliveryPersonName: string; deliveryPersonPhone: string; dispatchedAt: any; pickedUpAt: any; deliveredAt: any; taskStatus: string; riderAcceptedAt: any; arrivedAtPickupAt: any; arrivedAtCustomerAt: any; sortMs: number }> = {};
 
         let allTasks: Array<{ id: string; [key: string]: any }>;
         if (since) {
@@ -155,7 +156,11 @@ async function handleGET(request: Request) {
                 taskStatus === 'EN_ROUTE_TO_CUSTOMER' || taskStatus === 'ARRIVED_AT_CUSTOMER' ||
                 taskStatus === 'ASSIGNED'
             );
-            if (isActiveTask) {
+            // Newest live task wins — the same rule the customer app and
+            // functions/orderStage.js use. Iteration order is not creation order.
+            const sortMs = (taskData.createdAt?.toMillis?.() ?? taskData.createdAt?._seconds * 1000) || 0;
+            const existing = tasksByOrderId[orderId];
+            if (isActiveTask && (!existing || sortMs >= existing.sortMs)) {
                 tasksByOrderId[orderId] = {
                     deliveryPersonId: taskData.deliveryPersonId as string,
                     deliveryPersonName: (taskData.deliveryPersonName || '') as string,
@@ -164,6 +169,10 @@ async function handleGET(request: Request) {
                     pickedUpAt: taskData.pickedUpAt || null,
                     deliveredAt: taskData.deliveredAt || taskData.completedAt || null,
                     taskStatus: taskStatus,
+                    riderAcceptedAt: taskData.acceptedAt || null,
+                    arrivedAtPickupAt: taskData.arrivedAtPickupAt || null,
+                    arrivedAtCustomerAt: taskData.arrivedAtCustomerAt || null,
+                    sortMs,
                 };
                 deliveryPersonIds.add(taskData.deliveryPersonId as string);
             }
@@ -257,8 +266,21 @@ async function handleGET(request: Request) {
                 || tsToIso(taskInfo?.dispatchedAt)
                 || null;
 
-            // Compute pickedUpAt: order doc field → delivery task picked up time
-            const pickedUpAt = tsToIso(data.pickedUpAt) || tsToIso(taskInfo?.pickedUpAt) || null;
+            // Real pickup time. NOT orders.pickedUpAt: the shared assignment code
+            // (OrderRepository.assignDeliveryPerson) stamps that the moment a rider
+            // ACCEPTS, before anyone has reached the restaurant. Only the verified
+            // pickup PIN or the rider's own PICKED_UP step mean the food left.
+            const pickedUpAt = tsToIso(data.pickupPinVerifiedAt)
+                || tsToIso(taskInfo?.pickedUpAt)
+                || null;
+
+            // ── One honest stage (see src/lib/order-stage.ts) ──
+            const taskStatusForStage = taskInfo?.taskStatus || '';
+            const pinVerified = data.pickupPinVerified === true;
+            const opsStage = opsStageOf(data.status, taskStatusForStage, pinVerified);
+            const customerStage = customerStageOf(data.status, taskStatusForStage, pinVerified);
+            const acceptedAtIso = tsToIso(data.acceptedAt) || tsToIso(data.confirmedAt) || null;
+            const promisedMs = promisedDeliveryMs(acceptedAtIso, data.preparationTimeMinutes, data.distanceKm);
 
             // ── Discounts ──
             //
@@ -339,6 +361,17 @@ async function handleGET(request: Request) {
                 codSettled: data.codSettled ?? false,
                 // Delivery task status (from deliveryTasks collection)
                 deliveryTaskStatus: taskInfo?.taskStatus || '',
+                // Merged stage + honest milestones (src/lib/order-stage.ts)
+                opsStage,
+                customerStage,
+                foodReady: !!data.preparedAt || ['Prepared', 'Ready for Pickup'].includes(String(data.status || '').trim()),
+                preparationTimeMinutes: Number(data.preparationTimeMinutes) || 0,
+                expectedReadyAt: tsToIso(data.expectedReadyAt),
+                promisedDeliveryAt: promisedMs ? new Date(promisedMs).toISOString() : null,
+                riderSearchStartedAt: tsToIso(data.sentForDeliveryAt),
+                riderAssignedAt: tsToIso(taskInfo?.riderAcceptedAt) || tsToIso(taskInfo?.dispatchedAt),
+                riderAtRestaurantAt: tsToIso(taskInfo?.arrivedAtPickupAt),
+                atCustomerAt: tsToIso(taskInfo?.arrivedAtCustomerAt),
                 // Coin & promo discount info
                 coinsUsed: data.coinsUsed || 0,
                 coinDiscount: data.coinDiscount || 0,
@@ -385,7 +418,8 @@ async function handleGET(request: Request) {
                     { header: 'Customer', key: 'customerName', width: 22 },
                     { header: 'Phone', key: 'customerPhone', width: 14 },
                     { header: 'Restaurant', key: 'vendorName', width: 24 },
-                    { header: 'Status', key: 'status', width: 13 },
+                    { header: 'Stage', key: 'stageLabel', width: 20 },
+                    { header: 'Raw Status', key: 'status', width: 13 },
                     { header: 'Payment Mode', key: 'paymentMode', width: 14 },
                     { header: 'Payment Status', key: 'paymentStatus', width: 14 },
                     { header: 'Items', key: 'itemList', width: 40 },
@@ -413,6 +447,7 @@ async function handleGET(request: Request) {
                         dateLabel: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
                         timeLabel: d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
                         itemList: (o.itemNames || []).join('; '),
+                        stageLabel: OPS_STAGE_META[o.opsStage as keyof typeof OPS_STAGE_META]?.label || o.status,
                         grossItemTotal: round2((o.itemTotal || 0) + (o.itemDiscount || 0)),
                     };
                 }),

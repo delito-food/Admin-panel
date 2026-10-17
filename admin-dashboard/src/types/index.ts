@@ -165,6 +165,12 @@ export interface OrderItem {
   specialInstructions: string;
 }
 
+/**
+ * Raw orders.status values as the apps write them. For anything shown to a
+ * person, derive the real stage with src/lib/order-stage.ts instead — the vendor
+ * app writes Accepted/Prepared (never Preparing), and "Sent for delivery" means
+ * the rider search started, not that the food left.
+ */
 export type OrderStatus =
   | 'Pending'
   | 'Accepted'
@@ -174,7 +180,10 @@ export type OrderStatus =
   | 'Picked Up'
   | 'Sent for delivery'
   | 'Delivered'
-  | 'Cancelled';
+  | 'Cancelled'
+  | 'Cancelled by Admin'
+  | 'Not Responded'
+  | 'Expired';
 
 export interface SpecialOffer {
   offerId: string;

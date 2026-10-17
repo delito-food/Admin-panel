@@ -47,10 +47,32 @@ import {
 import { useApi, Order } from '@/hooks/useApi';
 import { OrderBill } from './OrderBill';
 import { authenticatedFetch, downloadAuthenticatedFile } from '@/lib/api-client';
+import {
+    opsStageOf, opsStageLabel, OPS_STAGE_META, OPS_GROUPS, minutesBetween,
+    type OpsStage, type OpsGroup,
+} from '@/lib/order-stage';
 
 const CHART_COLORS = ['#F4511E', '#FF9904', '#F6D59F', '#10B981', '#E9190C'];
 
-const statusFilters = ['All', 'Pending', 'Accepted', 'Preparing', 'Prepared', 'Sent for delivery', 'Delivered', 'Not Responded', 'Expired', 'Cancelled', 'Cancelled by Admin'];
+// Filters are by real stage, not raw status. The vendor app only writes
+// Pending → Accepted → Prepared, and "Sent for delivery" means the rider search
+// started — so filtering on raw strings left "Preparing" permanently empty and
+// put orders still in the kitchen under "on the way". See src/lib/order-stage.ts.
+const statusFilters: ('All' | OpsGroup)[] = ['All', ...OPS_GROUPS.map(g => g.key)];
+
+const filterLabel = (f: string) =>
+    f === 'All' ? 'All' : (OPS_GROUPS.find(g => g.key === f)?.label ?? f);
+
+/** The order's merged stage — from the API, or derived here for older payloads. */
+const stageOfOrder = (o: Order): OpsStage =>
+    o.opsStage ?? opsStageOf(o.status, o.deliveryTaskStatus, o.pickupPinVerified);
+
+/** Live order more than 5 minutes past the promise made at acceptance. */
+const isLate = (o: Order): boolean => {
+    const g = OPS_STAGE_META[stageOfOrder(o)].group;
+    if (g === 'delivered' || g === 'issues' || !o.promisedDeliveryAt) return false;
+    return Date.now() - Date.parse(o.promisedDeliveryAt) > 5 * 60_000;
+};
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
@@ -228,7 +250,8 @@ export default function OrdersPage() {
                 (order.vendorName || '').toLowerCase().includes(q) ||
                 (order.invoiceNumber || '').toLowerCase().includes(q);
 
-            const matchesStatus = statusFilter === 'All' || order.status === statusFilter;
+            const matchesStatus = statusFilter === 'All' ||
+                OPS_STAGE_META[stageOfOrder(order)].group === statusFilter;
 
             return matchesSearch && matchesStatus;
         });
@@ -259,44 +282,28 @@ export default function OrdersPage() {
         return pages;
     }, [safePage, totalPages]);
 
-    const getStatusBadge = (status: string) => {
-        switch (status.toLowerCase()) {
-            case 'delivered':
-                return 'badge-approved';
-            case 'pending':
-            case 'preparing':
-                return 'badge-pending';
-            case 'cancelled':
-            case 'not responded':
-                return 'badge-rejected';
-            default:
-                return 'badge-active';
+    const getStatusBadge = (order: Order) => {
+        switch (OPS_STAGE_META[stageOfOrder(order)].group) {
+            case 'delivered': return 'badge-approved';
+            case 'awaiting':
+            case 'kitchen': return 'badge-pending';
+            case 'issues': return 'badge-rejected';
+            default: return 'badge-active';
         }
     };
 
-    const getStatusIcon = (status: string) => {
-        switch (status.toLowerCase()) {
-            case 'delivered':
-                return <CheckCircle size={14} />;
-            case 'cancelled':
-            case 'not responded':
-                return <XCircle size={14} />;
-            case 'sent for delivery':
-                return <Truck size={14} />;
-            case 'preparing':
-                return <Package size={14} />;
-            default:
-                return <Clock size={14} />;
+    const getStatusIcon = (order: Order) => {
+        switch (OPS_STAGE_META[stageOfOrder(order)].group) {
+            case 'delivered': return <CheckCircle size={14} />;
+            case 'issues': return <XCircle size={14} />;
+            case 'onTheWay': return <Truck size={14} />;
+            case 'kitchen': return <Package size={14} />;
+            case 'pickup': return <Store size={14} />;
+            default: return <Clock size={14} />;
         }
     };
 
-    const getDisplayStatus = (status: string) => {
-        switch (status) {
-            case 'Preparing': return 'Accepted & Preparing';
-            case 'Sent for delivery': return 'Delivery partner assigned';
-            default: return status;
-        }
-    };
+    const getDisplayStatus = (order: Order) => opsStageLabel(stageOfOrder(order), order.foodReady);
 
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
@@ -321,14 +328,16 @@ export default function OrdersPage() {
     // Stats
     const stats = {
         total: (orders || []).length,
-        pending: (orders || []).filter(o => o.status === 'Pending').length,
-        preparing: (orders || []).filter(o => o.status === 'Preparing').length,
-        onTheWay: (orders || []).filter(o => o.status === 'Sent for delivery').length,
-        delivered: (orders || []).filter(o => o.status === 'Delivered').length,
-        notResponded: (orders || []).filter(o => o.status === 'Not Responded').length,
+        pending: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'awaiting').length,
+        preparing: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'kitchen').length,
+        awaitingPickup: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'pickup').length,
+        onTheWay: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'onTheWay').length,
+        delivered: (orders || []).filter(o => stageOfOrder(o) === 'DELIVERED').length,
+        late: (orders || []).filter(isLate).length,
+        notResponded: (orders || []).filter(o => stageOfOrder(o) === 'NOT_RESPONDED').length,
         // 'Expired' = vendor accepted but no delivery partner was ever found.
         // Written by functions/deliveryPush.js expireDeliveryRequests.
-        noRider: (orders || []).filter(o => o.status === 'Expired').length,
+        noRider: (orders || []).filter(o => stageOfOrder(o) === 'NO_RIDER').length,
     };
 
     const orderTrendData = (orders || []).reduce((acc: { date: string; orders: number }[], order) => {
@@ -343,8 +352,9 @@ export default function OrdersPage() {
     }, []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(-7);
 
     const statusDistribution = [
-        { name: 'Pending', value: stats.pending, color: '#F6D59F' },
+        { name: 'Awaiting vendor', value: stats.pending, color: '#F6D59F' },
         { name: 'Preparing', value: stats.preparing, color: '#FF9904' },
+        { name: 'Awaiting pickup', value: stats.awaitingPickup, color: '#0EA5E9' },
         { name: 'On the Way', value: stats.onTheWay, color: '#F4511E' },
         { name: 'Delivered', value: stats.delivered, color: '#10B981' },
         { name: 'Not Responded', value: stats.notResponded, color: '#E9190C' },
@@ -404,11 +414,12 @@ export default function OrdersPage() {
                         Order Statistics
                     </div>
                 </div>
-                <div className="grid grid-cols-2 lg:grid-cols-5" style={{ gap: '1.5rem' }}>
+                <div className="grid grid-cols-2 lg:grid-cols-6" style={{ gap: '1.5rem' }}>
                     {[
                         { label: 'Total Orders', value: stats.total, icon: ShoppingBag, color: 'primary' },
-                        { label: 'Pending', value: stats.pending, icon: Clock, color: 'warning' },
+                        { label: 'Awaiting Vendor', value: stats.pending, icon: Clock, color: 'warning' },
                         { label: 'Preparing', value: stats.preparing, icon: Package, color: 'warning' },
+                        { label: stats.late ? `Awaiting Pickup · ${stats.late} late` : 'Awaiting Pickup', value: stats.awaitingPickup, icon: Store, color: 'primary' },
                         { label: 'On the Way', value: stats.onTheWay, icon: Truck, color: 'primary' },
                         { label: 'Delivered', value: stats.delivered, icon: CheckCircle, color: 'success' },
                     ].map((stat, index) => (
@@ -574,7 +585,7 @@ export default function OrdersPage() {
                                 className="btn btn-outline w-full sm:w-auto"
                             >
                                 <Filter size={16} />
-                                {getDisplayStatus(statusFilter)}
+                                {filterLabel(statusFilter)}
                                 <ChevronDown size={16} className={`transition-transform ${showFilterDropdown ? 'rotate-180' : ''}`} />
                             </button>
 
@@ -599,7 +610,7 @@ export default function OrdersPage() {
                                                     : 'hover:bg-[var(--surface-hover)]'
                                                     }`}
                                             >
-                                                {getDisplayStatus(filter)}
+                                                {filterLabel(filter)}
                                             </button>
                                         ))}
                                     </motion.div>
@@ -670,9 +681,14 @@ export default function OrdersPage() {
                                             <span className="font-semibold text-[var(--foreground)]">
                                                 ₹{order.total?.toLocaleString() || 0}
                                             </span>
-                                            <span className={`badge ${getStatusBadge(order.status)}`}>
-                                                {getStatusIcon(order.status)}
-                                                {getDisplayStatus(order.status)}
+                                            {isLate(order) && (
+                                                <span className="badge badge-rejected" title="More than 5 minutes past the delivery time promised at acceptance">
+                                                    <AlertTriangle size={12} /> Late
+                                                </span>
+                                            )}
+                                            <span className={`badge ${getStatusBadge(order)}`} title={`Raw status: ${order.status}${order.deliveryTaskStatus ? ` · rider task: ${order.deliveryTaskStatus}` : ''}`}>
+                                                {getStatusIcon(order)}
+                                                {getDisplayStatus(order)}
                                             </span>
                                             <button className="btn btn-ghost btn-icon-sm">
                                                 <Eye size={16} />
@@ -821,9 +837,12 @@ export default function OrdersPage() {
                                     </p>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <span className={`badge ${getStatusBadge(selectedOrder.status)}`}>
-                                        {getStatusIcon(selectedOrder.status)}
-                                        {getDisplayStatus(selectedOrder.status)}
+                                    <span className={`badge ${getStatusBadge(selectedOrder)}`}>
+                                        {getStatusIcon(selectedOrder)}
+                                        {getDisplayStatus(selectedOrder)}
+                                    </span>
+                                    <span style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', opacity: 0.8 }} title="What the apps actually wrote — for debugging">
+                                        raw: {selectedOrder.status}{selectedOrder.deliveryTaskStatus ? ` · task: ${selectedOrder.deliveryTaskStatus}` : ''}
                                     </span>
                                     {selectedOrder.status === 'Delivered' && (
                                         <button
@@ -1079,9 +1098,14 @@ export default function OrdersPage() {
                                             <div>
                                                 <p style={{ fontSize: '0.88rem', fontWeight: 500, color: 'var(--foreground-secondary)' }}>No delivery partner assigned</p>
                                                 <p style={{ fontSize: '0.72rem', color: 'var(--foreground-secondary)', opacity: 0.7, marginTop: 2 }}>
-                                                    {selectedOrder.status === 'Pending' ? 'Order awaiting vendor acceptance' :
-                                                     selectedOrder.status === 'Preparing' || selectedOrder.status === 'Accepted' ? 'Will be assigned when food is ready' :
-                                                     'Partner will be assigned shortly'}
+                                                    {(() => {
+                                                        const st = stageOfOrder(selectedOrder);
+                                                        if (st === 'AWAITING_VENDOR') return 'Order awaiting vendor acceptance';
+                                                        if (st === 'PREPARING') return 'Rider search starts ~5 min before the food is ready';
+                                                        if (st === 'FOOD_READY') return 'Food is ready — rider search should start within a minute';
+                                                        if (st === 'SEARCHING_RIDER') return 'Searching for a rider now';
+                                                        return 'Partner will be assigned shortly';
+                                                    })()}
                                                 </p>
                                             </div>
                                         </div>
@@ -1093,14 +1117,51 @@ export default function OrdersPage() {
 
                                 {/* ── SECTION 5: Order Timeline ── */}
                                 {(() => {
-                                    const steps = [
-                                        { label: 'Order Placed', time: selectedOrder.createdAt, done: true, icon: '📋' },
-                                        { label: 'Accepted by Vendor', time: selectedOrder.acceptedAt, done: !!selectedOrder.acceptedAt, icon: '✅' },
-                                        { label: 'Preparing', time: selectedOrder.preparingAt, done: !!selectedOrder.preparingAt, icon: '🍳' },
-                                        { label: 'Food Ready', time: selectedOrder.preparedAt, done: !!selectedOrder.preparedAt, icon: '✨' },
-                                        { label: 'Dispatched / Out for Delivery', time: selectedOrder.dispatchedAt || selectedOrder.pickedUpAt, done: !!(selectedOrder.dispatchedAt || selectedOrder.pickedUpAt || selectedOrder.deliveryPersonId), icon: '🚴' },
-                                        { label: 'Picked Up (PIN Verified)', time: selectedOrder.pickupPinVerifiedAt || selectedOrder.pickedUpAt, done: selectedOrder.pickupPinVerified || !!selectedOrder.pickedUpAt, icon: '📦' },
-                                        { label: 'Delivered (PIN Verified)', time: selectedOrder.deliveryPinVerifiedAt || selectedOrder.deliveredAt, done: selectedOrder.deliveryPinVerified || selectedOrder.status === 'Delivered', icon: '🏠' },
+                                    // Built only from timestamps that mean what they say.
+                                    // The vendor app records Accepted and Ready — there is
+                                    // no separate "started preparing" event any more — and
+                                    // orders.pickedUpAt is stamped when a rider ACCEPTS, so
+                                    // pickup comes from the PIN / the rider's own task.
+                                    const o = selectedOrder;
+                                    const stage = stageOfOrder(o);
+                                    const delivered = stage === 'DELIVERED';
+                                    const pickedUp = !!o.pickedUpAt || o.pickupPinVerified || ['OUT_FOR_DELIVERY', 'AT_CUSTOMER', 'DELIVERED'].includes(stage);
+                                    const fmtClock = (iso?: string | null) => iso
+                                        ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+                                        : '';
+                                    const readyDelta = minutesBetween(o.expectedReadyAt, o.preparedAt);
+                                    const riderWait = minutesBetween(o.riderAtRestaurantAt, o.pickedUpAt);
+                                    const deliveredDelta = minutesBetween(o.promisedDeliveryAt, o.deliveredAt);
+                                    const steps: { label: string; time: string | null | undefined; done: boolean; icon: string; note?: string; warn?: boolean }[] = [
+                                        { label: 'Order placed', time: o.createdAt, done: true, icon: '📋' },
+                                        {
+                                            label: o.preparationTimeMinutes ? `Accepted · committed ${o.preparationTimeMinutes} min prep` : 'Accepted by vendor',
+                                            time: o.acceptedAt, done: !!o.acceptedAt, icon: '✅',
+                                            note: o.acceptedAt
+                                                ? [
+                                                    `took ${minutesBetween(o.createdAt, o.acceptedAt) ?? '?'} min to accept`,
+                                                    o.promisedDeliveryAt ? `promised to customer by ${fmtClock(o.promisedDeliveryAt)}` : '',
+                                                  ].filter(Boolean).join(' · ')
+                                                : undefined,
+                                        },
+                                        {
+                                            label: 'Marked ready by vendor', time: o.preparedAt, done: !!o.preparedAt || !!o.foodReady, icon: '🍽️',
+                                            note: readyDelta === null ? (o.expectedReadyAt && !o.preparedAt ? `due by ${fmtClock(o.expectedReadyAt)}` : undefined)
+                                                : readyDelta > 0 ? `${readyDelta} min later than committed` : 'on time',
+                                            warn: readyDelta !== null && readyDelta > 5,
+                                        },
+                                        { label: 'Rider search started', time: o.riderSearchStartedAt, done: !!o.riderSearchStartedAt || !!o.riderAssignedAt || pickedUp, icon: '📡' },
+                                        { label: o.deliveryPersonName ? `Rider accepted · ${o.deliveryPersonName}` : 'Rider accepted', time: o.riderAssignedAt, done: !!o.riderAssignedAt || pickedUp, icon: '🛵' },
+                                        { label: 'Rider at restaurant', time: o.riderAtRestaurantAt, done: !!o.riderAtRestaurantAt || pickedUp, icon: '🏪',
+                                          note: riderWait !== null ? `waited ${riderWait} min for the food` : undefined, warn: riderWait !== null && riderWait > 8 },
+                                        { label: 'Picked up (PIN verified)', time: o.pickupPinVerifiedAt || o.pickedUpAt, done: pickedUp, icon: '📦' },
+                                        { label: 'Rider at customer', time: o.atCustomerAt, done: !!o.atCustomerAt || delivered, icon: '📍' },
+                                        {
+                                            label: 'Delivered', time: o.deliveryPinVerifiedAt || o.deliveredAt, done: delivered || o.deliveryPinVerified, icon: '🏠',
+                                            note: deliveredDelta === null ? undefined
+                                                : deliveredDelta > 0 ? `${deliveredDelta} min after the promised time` : `${-deliveredDelta} min before the promised time`,
+                                            warn: deliveredDelta !== null && deliveredDelta > 5,
+                                        },
                                     ];
                                     const hasAnyTimestamp = steps.some(s => s.time);
                                     if (!hasAnyTimestamp) return null;
@@ -1128,6 +1189,9 @@ export default function OrdersPage() {
                                                             )}
                                                             {!step.time && step.done && (
                                                                 <p style={{ fontSize: '0.68rem', color: 'var(--foreground-secondary)', marginTop: 1 }}>Completed</p>
+                                                            )}
+                                                            {step.note && (
+                                                                <p style={{ fontSize: '0.68rem', color: step.warn ? '#EF4444' : 'var(--foreground-secondary)', marginTop: 1 }}>{step.note}</p>
                                                             )}
                                                         </div>
                                                     </div>

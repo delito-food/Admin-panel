@@ -522,6 +522,17 @@ export interface Order {
     refundAmount: number;
     codSettled: boolean;
     deliveryTaskStatus: string;
+    // Merged stage + honest milestones — see src/lib/order-stage.ts
+    opsStage?: import('@/lib/order-stage').OpsStage;
+    customerStage?: import('@/lib/order-stage').CustomerStage;
+    foodReady?: boolean;
+    preparationTimeMinutes?: number;
+    expectedReadyAt?: string | null;
+    promisedDeliveryAt?: string | null;
+    riderSearchStartedAt?: string | null;
+    riderAssignedAt?: string | null;
+    riderAtRestaurantAt?: string | null;
+    atCustomerAt?: string | null;
     // Coin & promo discount info
     coinsUsed: number;
     coinDiscount: number;

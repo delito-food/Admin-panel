@@ -876,26 +876,45 @@ export default function HeroBannersPage() {
                                         <option value="none">Do nothing</option>
                                         <option value="vendor">Open a vendor</option>
                                         <option value="category">Open a category</option>
-                                        <option value="url">Open a link</option>
+                                        <option value="url">Open a link / app screen</option>
                                     </select>
                                 </Field>
                                 {draft.linkType !== 'none' && (
                                     <Field
                                         label={
                                             draft.linkType === 'vendor'
-                                                ? 'Vendor ID'
+                                                ? 'Vendor ID or exact shop name'
                                                 : draft.linkType === 'category'
                                                   ? 'Category name'
-                                                  : 'URL'
+                                                  : 'Link'
                                         }
                                     >
                                         <input
                                             value={draft.linkValue}
+                                            placeholder={
+                                                draft.linkType === 'vendor'
+                                                    ? 'e.g. 8fK2…xQ or Biryani House'
+                                                    : draft.linkType === 'category'
+                                                      ? 'e.g. Biryani'
+                                                      : 'https://… or app:wallet'
+                                            }
                                             onChange={(e) =>
                                                 setDraft({ ...draft, linkValue: e.target.value })
                                             }
                                             style={inputStyle}
                                         />
+                                        <span style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', lineHeight: 1.4 }}>
+                                            {draft.linkType === 'vendor'
+                                                ? 'Opens that restaurant. The ID is in Vendors → vendor page URL; an exact shop name also works.'
+                                                : draft.linkType === 'category'
+                                                  ? 'Opens search filtered to this category — use the same name as the home-screen category chip.'
+                                                  : 'Web links open in an in-app browser. In-app screens: app:wallet, app:hungerGame, app:pocketeats, app:yourOrders, app:cart, app:profile, app:helpSupport, app:allRestaurants/all (or /trending, /toprated). tel:, mailto: and upi: links open the phone\u2019s app.'}
+                                        </span>
+                                        {draft.linkValue.trim() === '' && (
+                                            <span style={{ fontSize: '0.7rem', color: '#D97706' }}>
+                                                Empty — the banner won’t respond to taps until this is filled in.
+                                            </span>
+                                        )}
                                     </Field>
                                 )}
                             </div>

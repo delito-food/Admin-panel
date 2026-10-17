@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { withAdmin } from '@/lib/api-guard';
+import { opsStageOf, OPS_STAGE_META } from '@/lib/order-stage';
 
 async function handleGET() {
     try {
@@ -48,8 +49,16 @@ async function handleGET() {
 
             vendorPerformance[vendorId].totalOrders += 1;
 
-            const status = order.status?.toLowerCase() || '';
-            if (status === 'delivered' || status === 'completed') {
+            // Bucket by real stage (src/lib/order-stage.ts), not raw status: the
+            // vendor app writes Accepted/Prepared (never Preparing), and Declined /
+            // Not Responded / Expired / Cancelled by Admin are cancellations too.
+            const raw = order.status?.toLowerCase() || '';
+            const opsStage = opsStageOf(order.status, '', order.pickupPinVerified === true);
+            const group = raw === 'completed' ? 'delivered'
+                : raw === 'placed' ? 'awaiting'
+                : opsStage === 'UNKNOWN' ? null
+                : OPS_STAGE_META[opsStage].group;
+            if (group === 'delivered') {
                 vendorPerformance[vendorId].completedOrders += 1;
                 vendorPerformance[vendorId].totalRevenue += (order.subtotal || order.total || 0);
                 
@@ -58,11 +67,11 @@ async function handleGET() {
                     vendorPerformance[vendorId].preparationTimeSum += order.preparationTime;
                     vendorPerformance[vendorId].prepTimeCount += 1;
                 }
-            } else if (status === 'cancelled') {
+            } else if (group === 'issues') {
                 vendorPerformance[vendorId].cancelledOrders += 1;
-            } else if (status === 'pending' || status === 'placed') {
+            } else if (group === 'awaiting') {
                 vendorPerformance[vendorId].pendingOrders += 1;
-            } else if (status === 'preparing' || status === 'accepted') {
+            } else if (group === 'kitchen' || group === 'pickup') {
                 vendorPerformance[vendorId].preparingOrders += 1;
             }
 
