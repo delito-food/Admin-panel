@@ -114,7 +114,8 @@ async function handleGET() {
 
         orderDocs.forEach(order => {
             const orderTotal = Number(order.total || 0);
-            const deliveryFee = Number(order.deliveryFee || 0);
+            // Fee + surge charge (both delivery-service income).
+            const deliveryFee = Number(order.deliveryFee || 0) + Number(order.surgeFee || 0);
             const subtotal = Number(order.subtotal || 0) || (orderTotal - deliveryFee);
             const originalItemTotal = Number(order.originalItemTotal || 0) || subtotal; // Commission base (before discounts)
 

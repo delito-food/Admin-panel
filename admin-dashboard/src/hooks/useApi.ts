@@ -557,6 +557,10 @@ export interface Order {
     campaignPlatformFunded?: number;
     hungerGameTotalDiscount?: number;
     hungerGameLevel2DeliveryDiscount?: number;
+    /** Surge charge (rain / high demand …), pre-GST. Its rider share is inside deliveryPersonEarnings. */
+    surgeFee?: number;
+    surgeRiderShare?: number;
+    surgeName?: string;
 }
 
 export interface PendingVendor {

@@ -127,7 +127,10 @@ async function handleGET() {
                 paymentMode: String(o.paymentMode || '').toLowerCase(),
                 subtotal: Number(o.subtotal || o.itemTotal || 0),
                 originalItemTotal: Number(o.originalItemTotal || o.itemTotal || o.subtotal || 0),
-                deliveryFee: Number(o.deliveryFee || 0),
+                // Delivery fee + surge charge. Surge is a delivery-service charge taxed at
+                // 18% like the fee, and its rider share is inside deliveryPersonEarnings —
+                // counting it here keeps collected-vs-paid-out honest. 0 on older orders.
+                deliveryFee: Number(o.deliveryFee || 0) + Number(o.surgeFee || 0),
                 taxes: Number(o.taxes || 0),
                 gstOnFood: Number(o.gstOnFood || 0),
                 gstOnServices: Number(o.gstOnServices || 0),

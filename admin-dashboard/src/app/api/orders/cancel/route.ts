@@ -127,6 +127,8 @@ async function handlePOST(request: Request) {
                     batch.update(dpRef, {
                         currentOrderId: null,
                         isAvailable: true,
+                        // Set by manual assignment; must be cleared with it.
+                        isOnDelivery: false,
                         updatedAt: Timestamp.now(),
                     });
                 }

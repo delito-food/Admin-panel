@@ -7,7 +7,7 @@ import {
     Phone, X, CheckCircle2, Clock, UserPlus, UserMinus,
     Loader2, Star
 } from 'lucide-react';
-import { useApi } from '@/hooks/useApi';
+import { useApi, invalidateApiCache } from '@/hooks/useApi';
 
 interface Order {
     orderId: string;
@@ -27,6 +27,10 @@ interface Order {
     deliveryPersonId: string | null;
     deliveryPersonName: string | null;
     isAssigned: boolean;
+    /** Live task status for the assigned rider (null when unassigned). */
+    taskStatus?: string | null;
+    /** Food is already with the rider — can't be reassigned/unassigned. */
+    isPickedUp?: boolean;
 }
 
 interface DeliveryPartner {
@@ -39,6 +43,8 @@ interface DeliveryPartner {
     isOnline: boolean;
     isOnDelivery: boolean;
     currentOrderId: string | null;
+    isSuspended?: boolean;
+    activeTaskStatus?: string | null;
     rating: number;
     totalDeliveries: number;
 }
@@ -80,7 +86,7 @@ function StatCard({ title, value, icon: Icon, color = 'primary' }: {
 }
 
 export default function OrderAssignmentPage() {
-    const { data, loading, refetch } = useApi<AssignmentData>('/api/orders/assignment');
+    const { data, loading, refetch } = useApi<AssignmentData>('/api/orders/assignment', { pollMs: 20000 });
     const [searchTerm, setSearchTerm] = useState('');
     const [partnerSearch, setPartnerSearch] = useState('');
     const [refreshing, setRefreshing] = useState(false);
@@ -134,6 +140,9 @@ export default function OrderAssignmentPage() {
             });
             const result = await response.json();
             if (result.success) {
+                // Other panel pages show the same rider status — make them re-read it.
+                invalidateApiCache('/api/delivery');
+                invalidateApiCache('/api/delivery/performance');
                 await refetch();
                 setSelectedOrder(null);
             } else {
@@ -152,6 +161,8 @@ export default function OrderAssignmentPage() {
             const response = await fetch(`/api/orders/assignment?orderId=${showConfirmUnassign.orderId}`, { method: 'DELETE' });
             const result = await response.json();
             if (result.success) {
+                invalidateApiCache('/api/delivery');
+                invalidateApiCache('/api/delivery/performance');
                 await refetch();
                 setShowConfirmUnassign(null);
             } else {
@@ -317,6 +328,13 @@ export default function OrderAssignmentPage() {
                                                 <span style={{ fontSize: '0.78rem', color: '#3B82F6', display: 'flex', alignItems: 'center', gap: 5 }}>
                                                     <Bike size={13} /> Assigned: {order.deliveryPersonName}
                                                 </span>
+                                                {order.isPickedUp ? (
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 8,
+                                                        background: 'rgba(6,182,212,0.1)', color: '#0E7490',
+                                                        fontSize: '0.7rem', fontWeight: 600,
+                                                    }}>Picked up</span>
+                                                ) : (
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); setShowConfirmUnassign(order); }}
                                                     style={{
@@ -329,6 +347,7 @@ export default function OrderAssignmentPage() {
                                                 >
                                                     <UserMinus size={12} /> Unassign
                                                 </button>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -371,11 +390,20 @@ export default function OrderAssignmentPage() {
                             </div>
                         ) : (
                             filteredPartners.map((partner) => {
-                                const isAvailable = partner.isOnline && !partner.isOnDelivery;
-                                const statusLabel = !partner.isOnline ? 'Offline' : partner.isOnDelivery ? 'On Delivery' : 'Available';
-                                const statusColor = !partner.isOnline ? { bg: 'rgba(107,114,128,0.1)', text: '#6B7280' }
+                                // Busy comes from the rider's LIVE delivery task (server side),
+                                // so it clears the moment the delivery is completed.
+                                const assignedHere = !!selectedOrder?.isAssigned && selectedOrder.deliveryPersonId === partner.deliveryPersonId;
+                                const isAvailable = partner.isOnline && !partner.isOnDelivery && !partner.isSuspended && !selectedOrder?.isPickedUp;
+                                const busyLabel = assignedHere
+                                    ? 'Assigned to this order'
+                                    : `On Delivery${partner.currentOrderId ? ` · #${partner.currentOrderId.slice(-6).toUpperCase()}` : ''}`;
+                                const statusLabel = partner.isSuspended ? 'Suspended'
+                                    : partner.isOnDelivery ? busyLabel
+                                        : !partner.isOnline ? 'Offline' : 'Available';
+                                const statusColor = partner.isSuspended ? { bg: 'rgba(239,68,68,0.1)', text: '#EF4444' }
                                     : partner.isOnDelivery ? { bg: 'rgba(245,158,11,0.1)', text: '#F59E0B' }
-                                        : { bg: 'rgba(16,185,129,0.1)', text: '#10B981' };
+                                        : !partner.isOnline ? { bg: 'rgba(107,114,128,0.1)', text: '#6B7280' }
+                                            : { bg: 'rgba(16,185,129,0.1)', text: '#10B981' };
 
                                 return (
                                     <div
@@ -440,7 +468,7 @@ export default function OrderAssignmentPage() {
                                                 flexShrink: 0,
                                             }}
                                         >
-                                            <UserPlus size={13} /> Assign
+                                            <UserPlus size={13} /> {assignedHere ? 'Assigned' : selectedOrder?.isAssigned ? 'Reassign' : 'Assign'}
                                         </button>
                                     </div>
                                 );

@@ -75,7 +75,8 @@ async function handleGET(request: Request) {
             foodTotalValue += itemTotal;
             foodTotalQuantity += totalQty;
 
-            const deliveryFee = (order.deliveryFee || 0) as number;
+            // Surge charge is billed under the delivery-service HSN with the fee.
+            const deliveryFee = ((order.deliveryFee || 0) as number) + ((order.surgeFee || 0) as number);
             if (deliveryFee > 0) { deliveryTotalValue += deliveryFee; deliveryCount += 1; }
 
             const platformFee = (order.smallOrderSupportFee || 0) as number;

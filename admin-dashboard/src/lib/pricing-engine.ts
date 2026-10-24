@@ -230,7 +230,10 @@ export function computeOrderEconomics(
         messages.push(`Item lines sum to ₹${lineSum.toFixed(2)} but the order records ₹${storedItemTotal.toFixed(2)}`);
     }
 
-    const deliveryGross = r2(num(order.deliveryFee));
+    // Surge (rain / high demand …) is a delivery-service charge: same HSN, same 18%,
+    // and PricingCalculator puts its GST inside gstOnServices. Counting it here keeps
+    // the invoice total equal to what the customer paid. 0 on every older order.
+    const deliveryGross = r2(num(order.deliveryFee) + Math.max(0, num(order.surgeFee)));
     const platformGross = r2(num(order.smallOrderSupportFee, order.platformFee));
 
     // Tax as charged. gstOnServices covers delivery + platform together and is

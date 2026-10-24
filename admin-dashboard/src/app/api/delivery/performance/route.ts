@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 import { db, collections } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { withAdmin } from '@/lib/api-guard';
+import { getLiveJobs } from '@/lib/rider-jobs';
 
 async function handleGET() {
     try {
         // Get all delivery partners
         const deliverySnapshot = await db.collection(collections.deliveryPersons).get();
+        // "On delivery" = has a live delivery task (see lib/rider-jobs.ts). Falls back
+        // to the stored flag only if the task query itself fails.
+        const live = await getLiveJobs().catch((e) => { console.error('live jobs read failed', e); return null; });
         
         // Get all orders
         const ordersSnapshot = await db.collection(collections.orders).get();
@@ -141,7 +145,7 @@ async function handleGET() {
                 vehicleType: data.vehicleType || '',
                 vehicleNumber: data.vehicleNumber || '',
                 isOnline: data.isOnline || false,
-                isOnDelivery: data.isOnDelivery || false,
+                isOnDelivery: live ? live.byRider.has(doc.id) : (data.isOnDelivery || false),
                 isVerified: data.isVerified || false,
                 // Performance metrics
                 totalDeliveries: perf.totalDeliveries || data.totalDeliveries || 0,

@@ -396,6 +396,9 @@ async function handleGET(request: Request) {
                 campaignPlatformFunded: data.campaignPlatformFunded || 0,
                 hungerGameTotalDiscount: data.hungerGameDiscount || 0,
                 hungerGameLevel2DeliveryDiscount: data.hungerGameLevel2DeliveryDiscount || 0,
+                surgeFee: data.surgeFee || 0,
+                surgeRiderShare: data.surgeRiderShare || 0,
+                surgeName: data.surgeName || '',
             };
         });
 
@@ -432,6 +435,7 @@ async function handleGET(request: Request) {
                     { header: 'Delivery Discount', key: 'deliveryDiscount', width: 16, type: 'currency' },
                     { header: 'Total Discount', key: 'totalDiscount', width: 15, type: 'currency' },
                     { header: 'Delivery Fee', key: 'deliveryFee', width: 14, type: 'currency' },
+                    { header: 'Surge Fee', key: 'surgeFee', width: 12, type: 'currency' },
                     { header: 'Platform Fee', key: 'smallOrderSupportFee', width: 14, type: 'currency' },
                     { header: 'Taxes (GST)', key: 'taxes', width: 14, type: 'currency' },
                     { header: 'Total', key: 'total', width: 14, type: 'currency' },
@@ -458,6 +462,7 @@ async function handleGET(request: Request) {
                     itemTotal: round2(orders.reduce((s: number, o: any) => s + (o.itemTotal || 0), 0)),
                     totalDiscount: round2(orders.reduce((s: number, o: any) => s + (o.totalDiscount || 0), 0)),
                     deliveryFee: round2(orders.reduce((s: number, o: any) => s + (o.deliveryFee || 0), 0)),
+                    surgeFee: round2(orders.reduce((s: number, o: any) => s + (o.surgeFee || 0), 0)),
                     smallOrderSupportFee: round2(orders.reduce((s: number, o: any) => s + (o.smallOrderSupportFee || 0), 0)),
                     taxes: round2(orders.reduce((s: number, o: any) => s + (o.taxes || 0), 0)),
                     total: round2(orders.reduce((s: number, o: any) => s + (o.total || 0), 0)),

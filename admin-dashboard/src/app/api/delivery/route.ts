@@ -2,11 +2,20 @@ import { NextResponse } from 'next/server';
 import { db, collections, cachedCollection, invalidateCache } from '@/lib/firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { withAdmin } from '@/lib/api-guard';
+import { getLiveJobs, healStaleRiderFlags } from '@/lib/rider-jobs';
 
 async function handleGET() {
     try {
         // Get all delivery persons (cached)
         const deliveryDocs = await cachedCollection(collections.deliveryPersons);
+
+        // "On delivery" = has a live delivery task, not the stored isOnDelivery flag
+        // (which manual assignment set and nothing ever cleared). See lib/rider-jobs.ts.
+        const live = await getLiveJobs().catch((e) => { console.error('live jobs read failed', e); return null; });
+        if (live) {
+            const healed = await healStaleRiderFlags(deliveryDocs, live.byRider);
+            if (healed) invalidateCache(collections.deliveryPersons);
+        }
 
         // Get all orders to calculate earnings (cached)
         const orderDocs = await cachedCollection(collections.orders);
@@ -100,7 +109,7 @@ async function handleGET() {
                 codSettled: earnings.codSettled || (data.codSettled as number) || 0,
                 codPending: (earnings.codCollected - earnings.codSettled) || (data.codPending as number) || 0,
                 isOnline: data.isOnline || false,
-                isOnDelivery: data.isOnDelivery || false,
+                isOnDelivery: live ? live.byRider.has(data.id) : (data.isOnDelivery || false),
                 isVerified: data.isVerified || false,
                 isSuspended: data.isSuspended || false,
                 suspensionReason: data.suspensionReason || '',

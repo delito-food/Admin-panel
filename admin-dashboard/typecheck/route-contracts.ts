@@ -24,6 +24,7 @@ import type { GET as CreditNotesGET, POST as CreditNotesPOST } from '@/app/api/c
 import type { GET as DebitNotesGET, POST as DebitNotesPOST } from '@/app/api/debit-notes/route';
 import type { POST as RefundsPOST } from '@/app/api/refunds/route';
 import type { PUT as PayoutsPUT } from '@/app/api/payouts/route';
+import type { GET as SurgeGET, POST as SurgePOST, PATCH as SurgePATCH, DELETE as SurgeDELETE } from '@/app/api/surge/route';
 
 /** What Next.js calls a route handler with, for a static segment. */
 type StaticRoute = (request: NextRequest, context: { params: Promise<Record<string, never>> }) => Promise<Response>;
@@ -57,6 +58,12 @@ type _DebitNotesGET = Assert<StaticRoute, typeof DebitNotesGET>;
 type _DebitNotesPOST = Assert<StaticRoute, typeof DebitNotesPOST>;
 type _RefundsPOST = Assert<StaticRoute, typeof RefundsPOST>;
 type _PayoutsPUT = Assert<StaticRoute, typeof PayoutsPUT>;
+
+// Surge charges.
+type _SurgeGET = Assert<StaticRoute, typeof SurgeGET>;
+type _SurgePOST = Assert<StaticRoute, typeof SurgePOST>;
+type _SurgePATCH = Assert<StaticRoute, typeof SurgePATCH>;
+type _SurgeDELETE = Assert<StaticRoute, typeof SurgeDELETE>;
 
 // A handler that declares no parameters at all still has to satisfy the contract.
 type _AutoTimeout = Assert<StaticRoute, typeof AutoTimeoutGET>;

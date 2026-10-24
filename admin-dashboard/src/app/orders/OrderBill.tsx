@@ -172,6 +172,10 @@ export function OrderBill({ order }: { order: Order }) {
     const deliveryFee = n0(order.deliveryFee);
     const deliveryBefore = Math.max(n0(order.deliveryFeeBeforeDiscount), deliveryFee);
     const deliveryWaived = r2(deliveryBefore - deliveryFee);
+    // Surge (rain / high demand …): a delivery-service charge, taxed with it. Its rider
+    // share is already inside deliveryPersonEarnings (riderPay below).
+    const surge = n0(order.surgeFee);
+    const surgeRider = Math.min(n0(order.surgeRiderShare), surge);
     const gstFood = n0(order.gstOnFood);
     const gstServices = n0(order.gstOnServices);
     const taxes = n0(order.taxes) || r2(gstFood + gstServices);
@@ -180,7 +184,7 @@ export function OrderBill({ order }: { order: Order }) {
     const total = n0(order.total);
     const tip = n0(order.tip);
 
-    const built = r2(itemTotal - campaign - promo - hgFood + deliveryFee + platformFee + cod + taxes - coins - hgDelivery);
+    const built = r2(itemTotal - campaign - promo - hgFood + deliveryFee + surge + platformFee + cod + taxes - coins - hgDelivery);
     const rounding = r2(total - built);
 
     // ── Settlement ──
@@ -196,7 +200,7 @@ export function OrderBill({ order }: { order: Order }) {
     const riderPay = riderStored ? n0(order.deliveryPersonEarnings) : (km > 0 ? Math.max(15, r2(10 + km * 6.5)) : 15);
     const delitoShare = r2(total - vendorPayout - riderPay - taxes);
 
-    const delitoParts = r2(commission + gstOnCommission + platformFee + cod + deliveryFee - riderPay - campaignPlatform - promo - hgFood - coins - hgDelivery);
+    const delitoParts = r2(commission + gstOnCommission + platformFee + cod + deliveryFee + surge - riderPay - campaignPlatform - promo - hgFood - coins - hgDelivery);
     const delitoAdjust = r2(delitoShare - delitoParts);
     const delitoNet = r2(delitoShare - gstOnCommission);
 
@@ -257,6 +261,11 @@ export function OrderBill({ order }: { order: Order }) {
                         ? <>{inr(deliveryBefore)} for {km || '—'} km − free delivery {inr(deliveryWaived)}</>
                         : km > 0 ? `${km} km` : undefined}
                     amount={deliveryFee} />
+                {surge > 0 && (
+                    <Row op="+" label={`${order.surgeName || 'Surge'} surge fee`}
+                        hint={`${inr(surgeRider)} to rider · ${inr(r2(surge - surgeRider))} Delito`}
+                        amount={surge} />
+                )}
                 {platformFee > 0 && (
                     <Row op="+" label="Platform fee"
                         hint={smallFee > 0 ? `technology ${inr(techFee)} + small-order ${inr(smallFee)}` : 'technology service fee'}
@@ -268,7 +277,7 @@ export function OrderBill({ order }: { order: Order }) {
                     <>
                         <Row op="+" label="GST on food (5%)" hint={<>5% × {inr(itemTotal)} item total</>} amount={gstFood} />
                         {gstServices > 0 && (
-                            <Row op="+" label="GST on services (18%)" hint={<>18% × {inr(r2(deliveryFee + platformFee))} delivery + platform fee</>} amount={gstServices} />
+                            <Row op="+" label="GST on services (18%)" hint={<>18% × {inr(r2(deliveryFee + surge + platformFee))} delivery{surge > 0 ? ' + surge' : ''} + platform fee</>} amount={gstServices} />
                         )}
                     </>
                 ) : (
@@ -345,6 +354,7 @@ export function OrderBill({ order }: { order: Order }) {
                             {platformFee > 0 && <Row op="+" label="Platform fee" amount={platformFee} />}
                             {cod > 0 && <Row op="+" label="COD charge" amount={cod} />}
                             <Row op="+" label="Delivery fee charged" amount={deliveryFee} />
+                            {surge > 0 && <Row op="+" label="Surge fee charged" amount={surge} />}
                             <Row op="−" label="Rider pay" amount={riderPay} tone="red" />
                             {campaignPlatform > 0 && <Row op="−" label="Delito's share of the offer" amount={campaignPlatform} tone="red" />}
                             {promo > 0 && <Row op="−" label="Promo" amount={promo} tone="red" />}

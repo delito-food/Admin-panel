@@ -27,6 +27,8 @@ export function calcOrderBreakdown(order: {
     itemTotal?: number;
     total?: number;
     deliveryFee?: number;
+    /** Surge charge; its rider share is already inside deliveryPersonEarnings. */
+    surgeFee?: number;
     deliveryPersonEarnings?: number;
     distanceKm?: number;
     smallOrderSupportFee?: number;
@@ -38,7 +40,9 @@ export function calcOrderBreakdown(order: {
     vendorGstOnPlatformCut?: number;
 }) {
     const subtotal = order.subtotal || order.itemTotal || 0;
-    const customerDeliveryFee = order.deliveryFee || 0;
+    // Delivery fee + surge: the payout below includes the rider's surge share, so the
+    // surge the customer paid must be on this side too or every surge order looks like a loss.
+    const customerDeliveryFee = (order.deliveryFee || 0) + (order.surgeFee || 0);
 
     // What the delivery partner actually earns — round1 precision matching apps
     const distanceKm = order.distanceKm || 0;
