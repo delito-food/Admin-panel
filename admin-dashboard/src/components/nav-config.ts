@@ -101,6 +101,7 @@ export const NAV: NavCategory[] = [
                     { label: 'Performance', href: '/delivery/performance' },
                     { label: 'COD Tracking', href: '/delivery/cod' },
                     { label: 'Surge Charges', href: '/surge' },
+                    { label: 'Rider Slots', href: '/delivery/slots' },
                     { label: 'Rider Support', href: '/support-tickets' },
                 ],
             },
