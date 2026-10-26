@@ -135,9 +135,13 @@ export default function RiderSlotsPage() {
         return json;
     };
 
-    const run = async (key: string, fn: () => Promise<unknown>, okText?: string) => {
+    const run = async (key: string, fn: () => Promise<unknown>, okText?: string | ((result: unknown) => string)) => {
         setBusy(key); setError(''); setNotice('');
-        try { await fn(); if (okText) setNotice(okText); await load(); }
+        try {
+            const result = await fn();
+            if (okText) setNotice(typeof okText === 'function' ? okText(result) : okText);
+            await load();
+        }
         catch (e) { setError(e instanceof Error ? e.message : 'Request failed'); }
         finally { setBusy(null); }
     };
@@ -196,7 +200,7 @@ export default function RiderSlotsPage() {
     );
 }
 
-type RunFn = (key: string, fn: () => Promise<unknown>, okText?: string) => Promise<void>;
+type RunFn = (key: string, fn: () => Promise<unknown>, okText?: string | ((result: unknown) => string)) => Promise<void>;
 type PostFn = (body: Record<string, unknown>) => Promise<{ data?: Record<string, unknown> }>;
 
 /* ── Board ─────────────────────────────────────────────────────────── */
@@ -400,9 +404,15 @@ function TemplatesTab({ data, busy, run, post }: { data: BoardData; busy: string
                     <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                         <button style={primary} disabled={busy === 'tpl'} onClick={() => run('tpl', async () => {
                             const { id, ...template } = draft;
-                            await post({ action: 'saveTemplate', id, template });
+                            const res = await post({ action: 'saveTemplate', id, template });
                             setDraft(null);
-                        }, 'Saved. Today’s and tomorrow’s slots are updated.')}>
+                            return res;
+                        }, (res) => {
+                            const kept = ((res as { data?: { kept?: { date: string; booked: number; start: string; end: string }[] } })?.data?.kept) || [];
+                            if (!kept.length) return 'Saved. Today’s and tomorrow’s slots now use these hours.';
+                            const list = kept.map(k => `${k.date === istToday() ? 'today' : 'tomorrow'} (${k.booked} rider${k.booked > 1 ? 's' : ''} booked ${fmt12(k.start)}–${fmt12(k.end)})`).join(' and ');
+                            return `Saved. Riders already booked ${list}, so that slot keeps its old hours. To move it, remove those riders on the Board and save again. New days use the new hours.`;
+                        })}>
                             {busy === 'tpl' && <Loader2 size={14} className="animate-spin" />} Save
                         </button>
                         <button style={btn} onClick={() => setDraft(null)}>Close</button>

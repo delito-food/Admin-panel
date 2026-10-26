@@ -296,26 +296,33 @@ async function notifyCancelled(riderId: string, start: string, end: string) {
     }
 }
 
-/**
- * Brings today's and tomorrow's slots of one template in line with it.
- * Slots that have started are never touched. Slots with bookings keep their times
- * (riders booked those hours) and never drop below their booked count.
- */
 type ValidTemplate = Extract<ReturnType<typeof core.validateTemplate>, { ok: true }>;
 
+/**
+ * Brings today's and tomorrow's slots of one template in line with it.
+ *
+ * Nobody booked → the slot simply follows the shift: new hours, name, capacity —
+ * even when its OLD hours have already started or passed (that was the bug where
+ * editing a shift left today's slot on the old time).
+ * Riders booked → they keep the hours they booked; only the name/tag change, and
+ * capacity never drops below the booked count. Those days are returned in `kept`
+ * so the panel can say so; remove the riders on the Board and save again to move them.
+ * Cancelled slots are left alone.
+ */
 async function syncTemplateSlots(templateId: string, t: ValidTemplate) {
     const nowMs = Date.now();
     const today = core.istDate(nowMs);
     const dates = [today, core.addDays(today, 1)];
     let updated = 0;
+    const kept: { date: string; booked: number; start: string; end: string }[] = [];
     for (const date of dates) {
         const ref = db.collection(SLOTS).doc(core.slotIdFor(date, t.value.pincode, templateId));
         const changed = await db.runTransaction(async (tx) => {
             const snap = await tx.get(ref);
             if (!snap.exists) return false;
             const s = snap.data() || {};
+            if (s.status === 'CANCELLED') return false;
             const startMs = core.toMs(s.startAt) || 0;
-            if (startMs <= nowMs) return false;
             const booked = Number(s.bookedCount) || 0;
             const runs = t.value.active && core.templateRuns(t.value, date);
             const update: Record<string, unknown> = {
@@ -324,7 +331,6 @@ async function syncTemplateSlots(templateId: string, t: ValidTemplate) {
                 isPeak: t.value.isPeak,
                 updatedAt: Timestamp.now(),
             };
-            if (s.capacityOverridden !== true) update.capacity = Math.max(t.value.capacity, booked);
             if (booked === 0) {
                 const w = core.slotWindow(date, t.value.start, t.value.end);
                 if (w) {
@@ -333,9 +339,15 @@ async function syncTemplateSlots(templateId: string, t: ValidTemplate) {
                     update.startAt = Timestamp.fromMillis(w.startMs);
                     update.endAt = Timestamp.fromMillis(w.endMs);
                 }
+                if (s.capacityOverridden !== true) update.capacity = t.value.capacity;
                 // Only reopen what this sync closed — never a slot an admin closed by hand.
                 if (!runs && s.status === 'OPEN') { update.status = 'CLOSED'; update.closedBy = 'template'; }
                 if (runs && s.status === 'CLOSED' && s.closedBy === 'template') { update.status = 'OPEN'; update.closedBy = null; }
+            } else {
+                if (s.capacityOverridden !== true && startMs > nowMs) update.capacity = Math.max(t.value.capacity, booked);
+                if (String(s.start || '') !== t.value.start || String(s.end || '') !== t.value.end) {
+                    kept.push({ date, booked, start: String(s.start || ''), end: String(s.end || '') });
+                }
             }
             tx.update(ref, update);
             return true;
@@ -343,7 +355,7 @@ async function syncTemplateSlots(templateId: string, t: ValidTemplate) {
         if (changed) updated++;
     }
     const created = t.value.active ? await store.generateSlots(deps(), dates, templateId) : 0;
-    return { updated, created };
+    return { updated, created, kept };
 }
 
 async function findRider(input: string): Promise<string | null> {
