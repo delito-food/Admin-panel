@@ -33,7 +33,7 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
-import { useApi, DashboardStats, Order } from '@/hooks/useApi';
+import { useApi, DashboardStats, Order, EarningsData } from '@/hooks/useApi';
 
 // Loading Skeleton
 function LoadingSkeleton() {
@@ -103,31 +103,37 @@ function StatCard({
   );
 }
 
-// Earnings Card — complete waterfall financial breakdown
+const fmtInr = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 1 });
+
+function Row({ label, value, sign, color, indent, bold }: { label: string; value: number; sign?: '+' | '−'; color?: string; indent?: boolean; bold?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: indent ? '0.65rem' : '0.7rem', fontWeight: bold ? 600 : 400 }}>
+      <span style={{ color: color || 'var(--foreground-secondary)', paddingLeft: indent ? 8 : 0 }}>{label}</span>
+      <span style={{ color: color || 'var(--foreground-secondary)', fontWeight: bold ? 600 : 500 }}>{sign ?? ''}₹{fmtInr(Math.abs(value))}</span>
+    </div>
+  );
+}
+
+// Earnings Card — Delito's real earning and how it is made up
+// (the maths lives in src/lib/order-breakdown.ts)
 function EarningsCard({
   title,
   earnings,
   subtitle
 }: {
   title: string;
-  earnings: {
-    gmv: number;
-    subtotal: number;
-    commission: number;
-    gstOnCommission: number;
-    platformCommissionEarning: number;
-    customerDeliveryFees: number;
-    partnerDeliveryPayouts: number;
-    deliveryFeeProfit: number;
-    netPlatformEarning: number;
-    vendorPayout: number;
-    orderCount: number;
-  };
+  earnings: EarningsData;
   subtitle: string;
 }) {
-  const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 1 });
-  const isSubsidy = earnings.deliveryFeeProfit < 0;
-  const deliverySubsidy = Math.abs(earnings.deliveryFeeProfit);
+  const fmt = fmtInr;
+  const commission = earnings.commission || 0;
+  const customerFees = (earnings.customerDeliveryFees || 0) + (earnings.platformFees || 0);
+  const riderPay = earnings.partnerDeliveryPayouts || 0;
+  const discounts = earnings.delitoFundedDiscounts || 0;
+  const other = earnings.otherAdjustments || 0;
+  const refunds = earnings.refunds || 0;
+  const marked = earnings.markedFulfilledCount || 0;
+  const net = earnings.netPlatformEarning || 0;
 
   return (
     <motion.div
@@ -151,63 +157,46 @@ function EarningsCard({
         </div>
       </div>
 
-      {/* Net Revenue in hand — most important headline */}
+      {/* Headline */}
       <div style={{ marginBottom: 10 }}>
-        <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', marginBottom: 2 }}>Platform Revenue (In Hand)</p>
-        <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#10B981' }}>₹{fmt(earnings.netPlatformEarning)}</p>
+        <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', marginBottom: 2 }} title="What stays with Delito after paying vendors, riders, GST and Delito-funded discounts">Delito Earnings (net)</p>
+        <p style={{ fontSize: '1.75rem', fontWeight: 700, color: net < 0 ? '#EF4444' : '#10B981' }}>{net < 0 ? '−' : ''}₹{fmt(Math.abs(net))}</p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, borderTop: '1px solid var(--glass-border)', paddingTop: 10 }}>
 
-        {/* GMV Row */}
+        {/* Where the customer's money went */}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', fontWeight: 600, paddingBottom: 6, borderBottom: '1px dashed var(--glass-border)' }}>
           <span style={{ color: 'var(--foreground)' }}>Total GMV (Customer Paid)</span>
           <span style={{ color: 'var(--foreground)' }}>₹{fmt(earnings.gmv)}</span>
         </div>
+        <Row label="To Vendors" value={earnings.vendorPayout} color="#F59E0B" />
+        <Row label="To Delivery Partners" value={riderPay + (earnings.tips || 0)} color="#3B82F6" />
+        <Row label="GST to Govt (bills + commission)" value={(earnings.customerGst || 0) + (earnings.gstOnCommission || 0)} />
 
-        {/* Vendor Payout */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem' }}>
-          <span style={{ color: 'var(--foreground-secondary)' }}>To Vendor</span>
-          <span style={{ color: '#F59E0B', fontWeight: 500 }}>₹{fmt(earnings.vendorPayout)}</span>
+        {/* How the earning is made up */}
+        <div style={{ marginTop: 4, paddingTop: 6, borderTop: '1px dashed var(--glass-border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <Row label="Commission from vendors (ex-GST)" value={commission} sign="+" color="#10B981" bold />
+          <Row label="Delivery, surge & platform fees" value={customerFees} sign="+" indent />
+          <Row label="Rider pay" value={riderPay} sign="−" indent color="#EF4444" />
+          {discounts > 0 && <Row label="Discounts Delito funded" value={discounts} sign="−" indent color="#EF4444" />}
+          {Math.abs(other) >= 1 && <Row label="Rounding & other" value={other} sign={other < 0 ? '−' : '+'} indent />}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', fontWeight: 700, paddingTop: 3 }}>
+            <span style={{ color: 'var(--foreground)' }}>= Delito Earnings</span>
+            <span style={{ color: net < 0 ? '#EF4444' : '#10B981' }}>{net < 0 ? '−' : ''}₹{fmt(Math.abs(net))}</span>
+          </div>
         </div>
 
-        {/* Delivery Partner Payout */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem' }}>
-          <span style={{ color: 'var(--foreground-secondary)' }}>To Delivery Partners</span>
-          <span style={{ color: '#3B82F6', fontWeight: 500 }}>₹{fmt(earnings.partnerDeliveryPayouts)}</span>
-        </div>
-
-        {/* Delivery fee collected vs paid (shows subsidy) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem' }}>
-          <span style={{ color: 'var(--foreground-secondary)', paddingLeft: 8 }}>↳ Collected from customers</span>
-          <span style={{ color: 'var(--foreground-secondary)' }}>₹{fmt(earnings.customerDeliveryFees)}</span>
-        </div>
-        {isSubsidy && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem' }}>
-            <span style={{ color: '#EF4444', paddingLeft: 8 }}>↳ Platform delivery subsidy</span>
-            <span style={{ color: '#EF4444' }}>−₹{fmt(deliverySubsidy)}</span>
+        {refunds > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', marginTop: 2 }} title="Refunded or waived to customers on these orders. Not deducted above — who bears each refund is set when it is issued.">
+            <span style={{ color: '#F59E0B' }}>⚠ Refunded on these orders</span>
+            <span style={{ color: '#F59E0B' }}>₹{fmt(refunds)}</span>
           </div>
         )}
 
-        {/* Commission breakdown */}
-        <div style={{ marginTop: 4, paddingTop: 6, borderTop: '1px dashed var(--glass-border)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', fontWeight: 600, marginBottom: 3 }}>
-            <span style={{ color: '#10B981' }}>Platform Commission Earning</span>
-            <span style={{ color: '#10B981' }}>₹{fmt(earnings.platformCommissionEarning)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem' }}>
-            <span style={{ color: 'var(--foreground-secondary)', paddingLeft: 8 }}>↳ Base Commission (15%)</span>
-            <span style={{ color: 'var(--foreground-secondary)' }}>₹{fmt(earnings.commission)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem' }}>
-            <span style={{ color: 'var(--foreground-secondary)', paddingLeft: 8 }}>↳ GST on Commission (18%)</span>
-            <span style={{ color: 'var(--foreground-secondary)' }}>₹{fmt(earnings.gstOnCommission)}</span>
-          </div>
-        </div>
-
         {/* Orders count */}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginTop: 4, paddingTop: 6, borderTop: '1px dashed var(--glass-border)' }}>
-          <span style={{ color: 'var(--foreground-secondary)' }}>Delivered Orders</span>
+          <span style={{ color: 'var(--foreground-secondary)' }}>Fulfilled Orders{marked > 0 ? ` (incl. ${marked} marked)` : ''}</span>
           <span style={{ color: 'var(--foreground)', fontWeight: 600 }}>{earnings.orderCount}</span>
         </div>
       </div>
@@ -375,7 +364,7 @@ export default function DashboardPage() {
 
   // Extract data from API response
   const platformEarnings = dashboardData?.platformEarnings || { today: emptyEarnings, thisWeek: emptyEarnings, thisMonth: emptyEarnings, allTime: emptyEarnings };
-  const ordersOverview = dashboardData?.ordersOverview || { total: 0, completed: 0, pending: 0, cancelled: 0, avgOrderValue: 0 };
+  const ordersOverview = dashboardData?.ordersOverview || { total: 0, completed: 0, markedFulfilled: 0, pending: 0, cancelled: 0, avgOrderValue: 0 };
   const vendorStats = dashboardData?.vendorStats || { total: 0, verified: 0, suspended: 0, online: 0, topPerformers: [] };
   const deliveryStats = dashboardData?.deliveryStats || { total: 0, verified: 0, suspended: 0, online: 0, topPerformers: [] };
   const customerMetrics = dashboardData?.customerMetrics || { total: 0, newThisMonth: 0, activeThisMonth: 0, retentionRate: 0 };
@@ -456,10 +445,10 @@ export default function DashboardPage() {
           <IndianRupee size={18} /> Platform Earnings
         </h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
-          <EarningsCard title="Today" earnings={platformEarnings.today} subtitle="Last 24 hours" />
-          <EarningsCard title="This Week" earnings={platformEarnings.thisWeek} subtitle="Last 7 days" />
-          <EarningsCard title="This Month" earnings={platformEarnings.thisMonth} subtitle="Last 30 days" />
-          <EarningsCard title="All Time" earnings={platformEarnings.allTime} subtitle="Total platform earnings" />
+          <EarningsCard title="Today" earnings={platformEarnings.today} subtitle="Since midnight (IST)" />
+          <EarningsCard title="This Week" earnings={platformEarnings.thisWeek} subtitle="Since Sunday (IST)" />
+          <EarningsCard title="This Month" earnings={platformEarnings.thisMonth} subtitle="Since the 1st (IST)" />
+          <EarningsCard title="All Time" earnings={platformEarnings.allTime} subtitle="Total Delito earnings" />
         </div>
       </div>
 
@@ -470,7 +459,7 @@ export default function DashboardPage() {
         </h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
           <StatCard title="Total Orders" value={ordersOverview.total.toLocaleString()} icon={ShoppingBag} color="primary" />
-          <StatCard title="Completed" value={ordersOverview.completed.toLocaleString()} subValue={`${ordersOverview.total > 0 ? ((ordersOverview.completed / ordersOverview.total) * 100).toFixed(1) : 0}%`} icon={CheckCircle2} color="success" />
+          <StatCard title={ordersOverview.markedFulfilled ? `Fulfilled · ${ordersOverview.markedFulfilled} marked` : 'Fulfilled'} value={ordersOverview.completed.toLocaleString()} subValue={`${ordersOverview.total > 0 ? ((ordersOverview.completed / ordersOverview.total) * 100).toFixed(1) : 0}%`} icon={CheckCircle2} color="success" />
           <StatCard title="Pending" value={ordersOverview.pending.toLocaleString()} icon={Clock} color="warning" />
           <StatCard title="Cancelled" value={ordersOverview.cancelled.toLocaleString()} subValue={`${ordersOverview.total > 0 ? ((ordersOverview.cancelled / ordersOverview.total) * 100).toFixed(1) : 0}%`} icon={XCircle} color="error" />
           <StatCard title="Avg. Order Value" value={`₹${ordersOverview.avgOrderValue.toLocaleString('en-IN', { maximumFractionDigits: 1 })}`} icon={DollarSign} color="blue" />

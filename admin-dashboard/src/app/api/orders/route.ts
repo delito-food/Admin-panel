@@ -9,6 +9,7 @@ import type { XlsxSheetSpec } from '@/lib/xlsx-writer';
 import { withAdmin } from '@/lib/api-guard';
 import { computeOrderEconomics } from '@/lib/pricing-engine';
 import { customerStageOf, opsStageOf, promisedDeliveryMs, OPS_STAGE_META } from '@/lib/order-stage';
+import { loadFulfilledMarks } from '@/lib/fulfilled-marks';
 
 async function handleGET(request: Request) {
     try {
@@ -233,6 +234,9 @@ async function handleGET(request: Request) {
             });
         }
 
+        // Admin "count as fulfilled" markers (separate collection; order docs untouched).
+        const fulfilledMarks = await loadFulfilledMarks();
+
         const orders = snapshot.docs.map(doc => {
 
             const data = doc.data();
@@ -399,6 +403,7 @@ async function handleGET(request: Request) {
                 surgeFee: data.surgeFee || 0,
                 surgeRiderShare: data.surgeRiderShare || 0,
                 surgeName: data.surgeName || '',
+                fulfilledMark: fulfilledMarks.get(doc.id) || null,
             };
         });
 
@@ -423,6 +428,7 @@ async function handleGET(request: Request) {
                     { header: 'Restaurant', key: 'vendorName', width: 24 },
                     { header: 'Stage', key: 'stageLabel', width: 20 },
                     { header: 'Raw Status', key: 'status', width: 13 },
+                    { header: 'Counted Fulfilled', key: 'fulfilledLabel', width: 16 },
                     { header: 'Payment Mode', key: 'paymentMode', width: 14 },
                     { header: 'Payment Status', key: 'paymentStatus', width: 14 },
                     { header: 'Items', key: 'itemList', width: 40 },
@@ -452,6 +458,7 @@ async function handleGET(request: Request) {
                         timeLabel: d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
                         itemList: (o.itemNames || []).join('; '),
                         stageLabel: OPS_STAGE_META[o.opsStage as keyof typeof OPS_STAGE_META]?.label || o.status,
+                        fulfilledLabel: o.opsStage === 'DELIVERED' ? 'Yes' : (o.fulfilledMark ? 'Yes (marked)' : 'No'),
                         grossItemTotal: round2((o.itemTotal || 0) + (o.itemDiscount || 0)),
                     };
                 }),

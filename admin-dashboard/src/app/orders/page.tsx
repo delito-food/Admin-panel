@@ -67,6 +67,15 @@ const filterLabel = (f: string) =>
 const stageOfOrder = (o: Order): OpsStage =>
     o.opsStage ?? opsStageOf(o.status, o.deliveryTaskStatus, o.pickupPinVerified);
 
+/** Marked "count as fulfilled" by an admin while its own status says otherwise. */
+const isMarkedFulfilled = (o: Order): boolean => !!o.fulfilledMark && stageOfOrder(o) !== 'DELIVERED';
+
+/** Delivered, or marked fulfilled — what every count on this page treats as done. */
+const isFulfilled = (o: Order): boolean => stageOfOrder(o) === 'DELIVERED' || isMarkedFulfilled(o);
+
+/** Filter bucket: a marked order is counted under Delivered, not under issues. */
+const groupOf = (o: Order): OpsGroup => isMarkedFulfilled(o) ? 'delivered' : OPS_STAGE_META[stageOfOrder(o)].group;
+
 /** Live order more than 5 minutes past the promise made at acceptance. */
 const isLate = (o: Order): boolean => {
     const g = OPS_STAGE_META[stageOfOrder(o)].group;
@@ -118,6 +127,53 @@ export default function OrdersPage() {
     const [cancelReason, setCancelReason] = useState('');
     const [cancelling, setCancelling] = useState(false);
     const [cancelResult, setCancelResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    // "Count as fulfilled" marker state
+    const [markNote, setMarkNote] = useState('');
+    const [marking, setMarking] = useState(false);
+    const [markResult, setMarkResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    /**
+     * Adds or removes the marker. Writes only adminFulfilledMarks/{orderId} —
+     * the order's status, refund and payouts are left exactly as they are.
+     */
+    const handleFulfilledMark = async (mark: boolean) => {
+        if (!selectedOrder) return;
+        setMarking(true);
+        setMarkResult(null);
+        const orderId = selectedOrder.orderId;
+        try {
+            const res = mark
+                ? await authenticatedFetch('/api/orders/fulfilled-mark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderId, note: markNote }),
+                })
+                : await authenticatedFetch(`/api/orders/fulfilled-mark?orderId=${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (!result.success) {
+                setMarkResult({ type: 'error', text: result.error || 'Failed' });
+                return;
+            }
+            const fulfilledMark = mark
+                ? { markedAt: new Date().toISOString(), markedBy: 'you', note: markNote.trim(), statusWhenMarked: selectedOrder.status }
+                : null;
+            setSelectedOrder({ ...selectedOrder, fulfilledMark });
+            mutate((orders || []).map(o => o.orderId === orderId ? { ...o, fulfilledMark } : o));
+            setMarkNote('');
+            setMarkResult({ type: 'success', text: result.message });
+        } catch {
+            setMarkResult({ type: 'error', text: 'Network error' });
+        } finally {
+            setMarking(false);
+        }
+    };
+
+    // A different order opened → clear the marker form.
+    useEffect(() => {
+        setMarkNote('');
+        setMarkResult(null);
+    }, [selectedOrder?.orderId]);
 
     const handleAdminCancel = async () => {
         if (!selectedOrder) return;
@@ -250,8 +306,7 @@ export default function OrdersPage() {
                 (order.vendorName || '').toLowerCase().includes(q) ||
                 (order.invoiceNumber || '').toLowerCase().includes(q);
 
-            const matchesStatus = statusFilter === 'All' ||
-                OPS_STAGE_META[stageOfOrder(order)].group === statusFilter;
+            const matchesStatus = statusFilter === 'All' || groupOf(order) === statusFilter;
 
             return matchesSearch && matchesStatus;
         });
@@ -332,12 +387,14 @@ export default function OrdersPage() {
         preparing: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'kitchen').length,
         awaitingPickup: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'pickup').length,
         onTheWay: (orders || []).filter(o => OPS_STAGE_META[stageOfOrder(o)].group === 'onTheWay').length,
-        delivered: (orders || []).filter(o => stageOfOrder(o) === 'DELIVERED').length,
+        // Fulfilled = delivered + orders an admin marked "count as fulfilled".
+        delivered: (orders || []).filter(isFulfilled).length,
+        markedFulfilled: (orders || []).filter(isMarkedFulfilled).length,
         late: (orders || []).filter(isLate).length,
-        notResponded: (orders || []).filter(o => stageOfOrder(o) === 'NOT_RESPONDED').length,
+        notResponded: (orders || []).filter(o => stageOfOrder(o) === 'NOT_RESPONDED' && !isMarkedFulfilled(o)).length,
         // 'Expired' = vendor accepted but no delivery partner was ever found.
         // Written by functions/deliveryPush.js expireDeliveryRequests.
-        noRider: (orders || []).filter(o => stageOfOrder(o) === 'NO_RIDER').length,
+        noRider: (orders || []).filter(o => stageOfOrder(o) === 'NO_RIDER' && !isMarkedFulfilled(o)).length,
     };
 
     const orderTrendData = (orders || []).reduce((acc: { date: string; orders: number }[], order) => {
@@ -356,7 +413,7 @@ export default function OrdersPage() {
         { name: 'Preparing', value: stats.preparing, color: '#FF9904' },
         { name: 'Awaiting pickup', value: stats.awaitingPickup, color: '#0EA5E9' },
         { name: 'On the Way', value: stats.onTheWay, color: '#F4511E' },
-        { name: 'Delivered', value: stats.delivered, color: '#10B981' },
+        { name: 'Fulfilled', value: stats.delivered, color: '#10B981' },
         { name: 'Not Responded', value: stats.notResponded, color: '#E9190C' },
         { name: 'No Rider', value: stats.noRider, color: '#9333EA' },
     ].filter(item => item.value > 0);
@@ -421,7 +478,7 @@ export default function OrdersPage() {
                         { label: 'Preparing', value: stats.preparing, icon: Package, color: 'warning' },
                         { label: stats.late ? `Awaiting Pickup · ${stats.late} late` : 'Awaiting Pickup', value: stats.awaitingPickup, icon: Store, color: 'primary' },
                         { label: 'On the Way', value: stats.onTheWay, icon: Truck, color: 'primary' },
-                        { label: 'Delivered', value: stats.delivered, icon: CheckCircle, color: 'success' },
+                        { label: stats.markedFulfilled ? `Fulfilled · ${stats.markedFulfilled} marked` : 'Fulfilled', value: stats.delivered, icon: CheckCircle, color: 'success' },
                     ].map((stat, index) => (
                         <motion.div
                             key={stat.label}
@@ -690,6 +747,11 @@ export default function OrdersPage() {
                                                 {getStatusIcon(order)}
                                                 {getDisplayStatus(order)}
                                             </span>
+                                            {isMarkedFulfilled(order) && (
+                                                <span className="badge badge-approved" title={`Counted as fulfilled by admin${order.fulfilledMark?.note ? ` — ${order.fulfilledMark.note}` : ''}`}>
+                                                    <CheckCircle size={12} /> Counted fulfilled
+                                                </span>
+                                            )}
                                             <button className="btn btn-ghost btn-icon-sm">
                                                 <Eye size={16} />
                                             </button>
@@ -841,6 +903,9 @@ export default function OrdersPage() {
                                         {getStatusIcon(selectedOrder)}
                                         {getDisplayStatus(selectedOrder)}
                                     </span>
+                                    {isMarkedFulfilled(selectedOrder) && (
+                                        <span className="badge badge-approved"><CheckCircle size={12} /> Counted fulfilled</span>
+                                    )}
                                     <span style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', opacity: 0.8 }} title="What the apps actually wrote — for debugging">
                                         raw: {selectedOrder.status}{selectedOrder.deliveryTaskStatus ? ` · task: ${selectedOrder.deliveryTaskStatus}` : ''}
                                     </span>
@@ -1214,6 +1279,72 @@ export default function OrdersPage() {
                                         </p>
                                     </div>
                                 </div>
+
+                                {/* ── Count as fulfilled marker ── */}
+                                {stageOfOrder(selectedOrder) !== 'DELIVERED' && (() => {
+                                    const o = selectedOrder;
+                                    const mark = o.fulfilledMark;
+                                    const refundOpen = !!o.refundStatus || (o.refundAmount || 0) > 0 || /refund/i.test(o.paymentStatus || '');
+                                    return (
+                                        <div className="glass-card p-4" style={{ border: `1px solid ${mark ? '#10B981' : 'var(--glass-border)'}`, background: mark ? 'rgba(16,185,129,0.06)' : undefined }}>
+                                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                                <div style={{ flex: 1, minWidth: 220 }}>
+                                                    <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                                                        Count as fulfilled
+                                                    </p>
+                                                    {mark ? (
+                                                        <p style={{ fontSize: '0.8rem', color: 'var(--foreground)' }}>
+                                                            ✅ Counted in fulfilled orders and Delito earnings
+                                                            {mark.markedAt ? ` · marked ${formatDateTime(mark.markedAt)}` : ''}
+                                                            {mark.markedBy ? ` by ${mark.markedBy}` : ''}
+                                                            {mark.note ? <><br /><span style={{ color: 'var(--foreground-secondary)', fontStyle: 'italic' }}>&ldquo;{mark.note}&rdquo;</span></> : null}
+                                                        </p>
+                                                    ) : (
+                                                        <p style={{ fontSize: '0.78rem', color: 'var(--foreground-secondary)', lineHeight: 1.5 }}>
+                                                            Use this when the food really reached the customer but the order shows &ldquo;{o.status}&rdquo;.
+                                                            Only the counts change — the order&apos;s status, refund and payouts stay exactly as they are.
+                                                        </p>
+                                                    )}
+                                                    {refundOpen && (
+                                                        <p style={{ fontSize: '0.72rem', color: '#F59E0B', marginTop: 6 }}>
+                                                            ⚠ This order has a refund on it ({o.refundStatus || o.paymentStatus}{o.refundAmount ? ` · ₹${o.refundAmount}` : ''}). Marking it does not stop or reverse that refund.
+                                                        </p>
+                                                    )}
+                                                    {!mark && (
+                                                        <input
+                                                            type="text"
+                                                            value={markNote}
+                                                            onChange={(e) => setMarkNote(e.target.value)}
+                                                            placeholder="Note (optional) — e.g. customer confirmed delivery"
+                                                            maxLength={300}
+                                                            className="input"
+                                                            style={{ marginTop: 10, width: '100%', fontSize: '0.8rem' }}
+                                                        />
+                                                    )}
+                                                    {markResult && (
+                                                        <p style={{ fontSize: '0.72rem', marginTop: 6, color: markResult.type === 'success' ? '#10B981' : '#EF4444' }}>{markResult.text}</p>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleFulfilledMark(!mark); }}
+                                                    disabled={marking}
+                                                    style={{
+                                                        display: 'flex', alignItems: 'center', gap: 6,
+                                                        padding: '10px 18px', borderRadius: 10,
+                                                        border: mark ? '1px solid var(--glass-border)' : 'none',
+                                                        background: mark ? 'transparent' : '#10B981',
+                                                        color: mark ? 'var(--foreground)' : 'white',
+                                                        fontSize: '0.82rem', fontWeight: 600,
+                                                        cursor: marking ? 'wait' : 'pointer', opacity: marking ? 0.6 : 1,
+                                                    }}
+                                                >
+                                                    {marking ? <Loader2 size={16} className="animate-spin" /> : mark ? <XCircle size={16} /> : <CheckCircle size={16} />}
+                                                    {mark ? 'Remove marker' : 'Mark as fulfilled'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* ── Admin Cancel Button ── */}
                                 {selectedOrder.status !== 'Delivered' && selectedOrder.status !== 'Cancelled' && selectedOrder.status !== 'Cancelled by Admin' && (

@@ -252,12 +252,19 @@ export interface EarningsData {
     customerDeliveryFees: number;   // Delivery fee collected from customers (₹4.5/km, ₹7.5/km for small orders)
     partnerDeliveryPayouts: number; // Actual delivery payout to partners (₹10 base + ₹6.5/km)
     deliveryFeeProfit: number;      // Net delivery P&L (usually negative = platform subsidises)
-    commission: number;             // 15% commission on subtotal
-    gstOnCommission: number;        // 18% GST on commission
-    platformCommissionEarning: number; // commission + gstOnCommission
-    netPlatformEarning: number;     // Actual money in hand (commission earning − delivery subsidy)
-    vendorPayout: number;           // Amount payable to vendors (subtotal − commission − gst)
+    commission: number;             // Commission charged to vendors (ex-GST)
+    gstOnCommission: number;        // 18% GST on commission — collected for the govt, not income
+    platformCommissionEarning: number; // commission + gstOnCommission, as billed to vendors
+    platformFees?: number;          // Platform / small-order / COD fees (ex-GST)
+    delitoFundedDiscounts?: number; // Promo, coins, HungerGame, Delito share of co-funded offers (ex-GST)
+    customerGst?: number;           // GST on customer bills, remitted
+    tips?: number;                  // Passed straight to riders
+    otherAdjustments?: number;      // COD rounding / unexplained differences
+    refunds?: number;               // Refunded or waived on these orders (shown, not netted)
+    netPlatformEarning: number;     // Delito's real earning — see src/lib/order-breakdown.ts
+    vendorPayout: number;           // Amount payable to vendors
     orderCount: number;
+    markedFulfilledCount?: number;  // Of orderCount, orders counted via the admin "fulfilled" marker
 }
 
 // Top performer structure
@@ -313,6 +320,7 @@ export interface DashboardStats {
     ordersOverview?: {
         total: number;
         completed: number;
+        markedFulfilled?: number;
         pending: number;
         cancelled: number;
         avgOrderValue: number;
@@ -561,6 +569,8 @@ export interface Order {
     surgeFee?: number;
     surgeRiderShare?: number;
     surgeName?: string;
+    /** Set when an admin marked this order "count as fulfilled". The order itself is unchanged. */
+    fulfilledMark?: { markedAt: string | null; markedBy: string; note: string; statusWhenMarked: string } | null;
 }
 
 export interface PendingVendor {

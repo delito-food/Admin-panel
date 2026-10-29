@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { collections, countDocuments, cachedCollection, cachedQuery } from '@/lib/firebase-admin';
 import { withAdmin } from '@/lib/api-guard';
-import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds } from '@/lib/fiscal';
+import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds, IST_OFFSET_MS } from '@/lib/fiscal';
 
 import { calcOrderBreakdown } from '@/lib/order-breakdown';
+import { loadFulfilledMarks, isFulfilledOrder } from '@/lib/fulfilled-marks';
+
+/** The IST calendar day of an instant, as "YYYY-MM-DD". */
+const istDayKey = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 
 type PeriodAccumulator = {
     gmv: number;
@@ -11,23 +15,32 @@ type PeriodAccumulator = {
     customerDeliveryFees: number;  // collected from customers
     partnerDeliveryPayouts: number; // paid to partners
     deliveryFeeProfit: number;     // net delivery (may be negative)
-    commission: number;
-    gstOnCommission: number;
-    platformCommissionEarning: number;
-    netPlatformEarning: number;    // actual revenue in hand
+    commission: number;            // ex-GST
+    gstOnCommission: number;       // collected from vendors, remitted
+    platformCommissionEarning: number; // commission + GST, as billed to vendors
+    platformFees: number;          // platform / small-order / COD fees (ex-GST)
+    delitoFundedDiscounts: number; // promo, coins, HungerGame, Delito share of offers (ex-GST)
+    customerGst: number;           // GST on customer bills, remitted
+    tips: number;                  // passed to riders
+    otherAdjustments: number;      // rounding / unexplained
+    refunds: number;               // refunded or waived on these orders (not netted)
+    netPlatformEarning: number;    // Delito's real earning
     vendorPayout: number;
     orderCount: number;
+    markedFulfilledCount: number;  // of orderCount, counted via admin marker
 };
 
 function emptyAccum(): PeriodAccumulator {
     return {
         gmv: 0, subtotal: 0, customerDeliveryFees: 0, partnerDeliveryPayouts: 0,
         deliveryFeeProfit: 0, commission: 0, gstOnCommission: 0,
-        platformCommissionEarning: 0, netPlatformEarning: 0, vendorPayout: 0, orderCount: 0,
+        platformCommissionEarning: 0, platformFees: 0, delitoFundedDiscounts: 0,
+        customerGst: 0, tips: 0, otherAdjustments: 0, refunds: 0,
+        netPlatformEarning: 0, vendorPayout: 0, orderCount: 0, markedFulfilledCount: 0,
     };
 }
 
-function addToAccum(acc: PeriodAccumulator, b: ReturnType<typeof calcOrderBreakdown>) {
+function addToAccum(acc: PeriodAccumulator, b: ReturnType<typeof calcOrderBreakdown>, marked: boolean) {
     acc.gmv += b.gmv;
     acc.subtotal += b.subtotal;
     acc.customerDeliveryFees += b.customerDeliveryFee;
@@ -36,9 +49,16 @@ function addToAccum(acc: PeriodAccumulator, b: ReturnType<typeof calcOrderBreakd
     acc.commission += b.commission;
     acc.gstOnCommission += b.gstOnCommission;
     acc.platformCommissionEarning += b.platformCommissionEarning;
+    acc.platformFees += b.platformFees;
+    acc.delitoFundedDiscounts += b.delitoFundedDiscounts;
+    acc.customerGst += b.customerGst;
+    acc.tips += b.tip;
+    acc.otherAdjustments += b.otherAdjustments;
+    acc.refunds += b.refunded;
     acc.netPlatformEarning += b.netPlatformEarning;
     acc.vendorPayout += b.vendorPayout;
     acc.orderCount += 1;
+    if (marked) acc.markedFulfilledCount += 1;
 }
 
 function roundAccum(acc: PeriodAccumulator): PeriodAccumulator {
@@ -52,9 +72,16 @@ function roundAccum(acc: PeriodAccumulator): PeriodAccumulator {
         commission: r(acc.commission),
         gstOnCommission: r(acc.gstOnCommission),
         platformCommissionEarning: r(acc.platformCommissionEarning),
+        platformFees: r(acc.platformFees),
+        delitoFundedDiscounts: r(acc.delitoFundedDiscounts),
+        customerGst: r(acc.customerGst),
+        tips: r(acc.tips),
+        otherAdjustments: r(acc.otherAdjustments),
+        refunds: r(acc.refunds),
         netPlatformEarning: r(acc.netPlatformEarning),
         vendorPayout: r(acc.vendorPayout),
         orderCount: acc.orderCount,
+        markedFulfilledCount: acc.markedFulfilledCount,
     };
 }
 
@@ -90,6 +117,9 @@ async function buildDashboardPayload() {
     const allVendorDocs = await cachedCollection(collections.vendors);
     const allDeliveryDocs = await cachedCollection(collections.deliveryPersons);
     const allCustomerDocs = await cachedCollection(collections.customers);
+    // Orders an admin marked "count as fulfilled" (really delivered, wrong status).
+    const fulfilledMarks = await loadFulfilledMarks();
+    const isMarked = (o: any) => !!o.id && fulfilledMarks.has(o.id) && !/^(delivered|completed)$/i.test(String(o.status || ''));
 
     // Compute counts from cached data (avoids 15 individual Firestore count queries)
     const totalVendors = allVendorDocs.length;
@@ -107,8 +137,9 @@ async function buildDashboardPayload() {
     const totalCustomers = allCustomerDocs.length;
     const totalOrders = allOrders.length;
     const pendingOrders = allOrders.filter(o => o.status === 'Pending').length;
-    const completedOrders = allOrders.filter(o => o.status === 'Delivered' || o.status === 'Completed').length;
-    const cancelledOrders = allOrders.filter(o => o.status === 'Cancelled').length;
+    const completedOrders = allOrders.filter(o => isFulfilledOrder(o, fulfilledMarks)).length;
+    const markedFulfilledOrders = allOrders.filter(isMarked).length;
+    const cancelledOrders = allOrders.filter(o => o.status === 'Cancelled' && !isMarked(o)).length;
 
     // Accumulators for each period
     let todayAcc = emptyAccum();
@@ -118,10 +149,10 @@ async function buildDashboardPayload() {
 
     // Daily trends (last 30 days)
     const dailyTrends: Record<string, { orders: number; gmv: number; netPlatformEarning: number }> = {};
+    // Keyed by IST calendar day. toISOString() alone gives the UTC day, which
+    // put every order placed between 00:00 and 05:30 IST on the previous day.
     for (let i = 0; i < 30; i++) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        const key = d.toISOString().split('T')[0];
+        const key = istDayKey(new Date(today.getTime() - i * 86_400_000));
         dailyTrends[key] = { orders: 0, gmv: 0, netPlatformEarning: 0 };
     }
 
@@ -138,26 +169,25 @@ async function buildDashboardPayload() {
         return isNaN(date.getTime()) ? null : date;
     }
 
-    // Process all delivered/completed orders
+    // Process all fulfilled orders: delivered/completed, plus admin-marked ones
     allOrders.forEach((order: any) => {
-        const status = (order.status || '').toLowerCase();
-        const isCompleted = status === 'delivered' || status === 'completed';
-        if (!isCompleted) return;
+        if (!isFulfilledOrder(order, fulfilledMarks)) return;
+        const marked = isMarked(order);
 
         const orderDate = parseDate(order.createdAt);
-        const breakdown = calcOrderBreakdown(order);
+        const breakdown = calcOrderBreakdown(order, order.id);
 
         // All time
-        addToAccum(allTimeAcc, breakdown);
+        addToAccum(allTimeAcc, breakdown, marked);
 
         if (orderDate && !isNaN(orderDate.getTime())) {
-            if (orderDate >= today) addToAccum(todayAcc, breakdown);
-            if (orderDate >= weekStart) addToAccum(weekAcc, breakdown);
-            if (orderDate >= monthStart) addToAccum(monthAcc, breakdown);
+            if (orderDate >= today) addToAccum(todayAcc, breakdown, marked);
+            if (orderDate >= weekStart) addToAccum(weekAcc, breakdown, marked);
+            if (orderDate >= monthStart) addToAccum(monthAcc, breakdown, marked);
 
             // Daily trends
             try {
-                const dateKey = orderDate.toISOString().split('T')[0];
+                const dateKey = istDayKey(orderDate);
                 if (dailyTrends[dateKey]) {
                     dailyTrends[dateKey].orders += 1;
                     dailyTrends[dateKey].gmv += breakdown.gmv;
@@ -255,6 +285,7 @@ async function buildDashboardPayload() {
             ordersOverview: {
                 total: totalOrders,
                 completed: completedOrders,
+                markedFulfilled: markedFulfilledOrders,
                 pending: pendingOrders,
                 cancelled: cancelledOrders,
                 avgOrderValue,
