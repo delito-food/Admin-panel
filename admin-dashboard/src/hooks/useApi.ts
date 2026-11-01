@@ -288,6 +288,11 @@ export interface TopPerformer {
     totalOrders: number;
     revenue: number;
     rating: number;
+    /** Delivery partners only: how `revenue` (their total earnings) is made up. */
+    deliveryPay?: number;
+    tips?: number;
+    incentives?: number;
+    lastDeliveredAt?: string | null;
 }
 
 export interface DashboardStats {

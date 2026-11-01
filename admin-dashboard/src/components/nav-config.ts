@@ -129,6 +129,7 @@ export const NAV: NavCategory[] = [
                     { label: 'Co-funded Offers', href: '/campaigns' },
                     { label: 'Special Offers', href: '/special-offers' },
                     { label: 'Hero Banners', href: '/hero-banners' },
+                    { label: 'Launch Screen', href: '/launch-screens' },
                     { label: 'Push Notifications', href: '/push-notifications' },
                 ],
             },

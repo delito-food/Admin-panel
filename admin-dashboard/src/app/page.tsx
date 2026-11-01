@@ -210,14 +210,27 @@ function TopPerformersCard({
   performers,
   icon: Icon,
   color,
-  href
+  href,
+  unit = 'orders',
+  rowHref,
 }: {
   title: string;
-  performers: Array<{ id: string; name: string; totalOrders: number; revenue: number; rating: number }>;
+  performers: Array<{ id: string; name: string; totalOrders: number; revenue: number; rating: number; deliveryPay?: number; tips?: number; incentives?: number }>;
   icon: React.ElementType;
   color: string;
   href: string;
+  /** "orders" for vendors, "deliveries" for riders. */
+  unit?: string;
+  /** Link each row to its profile, e.g. id => `/users/delivery/${id}`. */
+  rowHref?: (id: string) => string;
 }) {
+  // ₹850 below a thousand (₹0.9k hid the real figure), ₹12.4k above it.
+  const money = (v: number) => v >= 1000
+    ? `₹${(v / 1000).toFixed(1)}k`
+    : `₹${Math.round(v).toLocaleString('en-IN')}`;
+  const breakdown = (p: { deliveryPay?: number; tips?: number; incentives?: number }) =>
+    p.deliveryPay === undefined ? undefined
+      : `Delivery pay ₹${(p.deliveryPay || 0).toLocaleString('en-IN')} + tips ₹${(p.tips || 0).toLocaleString('en-IN')} + incentives ₹${(p.incentives || 0).toLocaleString('en-IN')}`;
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -266,15 +279,21 @@ function TopPerformersCard({
                 {i + 1}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)' }}>{p.totalOrders} orders</p>
+                {rowHref ? (
+                  <Link href={rowHref(p.id)} style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</Link>
+                ) : (
+                  <p style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                )}
+                <p style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)' }}>{p.totalOrders} {unit}</p>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)' }}>₹{(p.revenue / 1000).toFixed(1)}k</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Star size={10} color="#F59E0B" fill="#F59E0B" />
-                  <span style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)' }}>{p.rating.toFixed(1)}</span>
-                </div>
+              <div style={{ textAlign: 'right' }} title={breakdown(p)}>
+                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--foreground)' }}>{money(p.revenue)}</p>
+                {p.rating > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
+                    <Star size={10} color="#F59E0B" fill="#F59E0B" />
+                    <span style={{ fontSize: '0.65rem', color: 'var(--foreground-secondary)' }}>{p.rating.toFixed(1)}</span>
+                  </div>
+                )}
               </div>
             </div>
           ))
@@ -618,11 +637,13 @@ export default function DashboardPage() {
           href="/users/vendors"
         />
         <TopPerformersCard
-          title="Top Delivery Partners"
+          title="Top Earning Delivery Partners"
           performers={deliveryStats.topPerformers}
           icon={Bike}
           color="linear-gradient(135deg, #3B82F6, #2563EB)"
           href="/users/delivery"
+          unit="deliveries"
+          rowHref={(id) => `/users/delivery/${id}`}
         />
       </div>
 

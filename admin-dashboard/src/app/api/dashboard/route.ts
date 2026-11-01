@@ -5,6 +5,7 @@ import { istTodayBounds, istDaysAgoStart, istCurrentMonthBounds, IST_OFFSET_MS }
 
 import { calcOrderBreakdown } from '@/lib/order-breakdown';
 import { loadFulfilledMarks, isFulfilledOrder } from '@/lib/fulfilled-marks';
+import { computeRiderEarnings } from '@/lib/rider-earnings';
 
 /** The IST calendar day of an instant, as "YYYY-MM-DD". */
 const istDayKey = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
@@ -117,6 +118,8 @@ async function buildDashboardPayload() {
     const allVendorDocs = await cachedCollection(collections.vendors);
     const allDeliveryDocs = await cachedCollection(collections.deliveryPersons);
     const allCustomerDocs = await cachedCollection(collections.customers);
+    // Delivered tasks say which rider actually made each delivery.
+    const allDeliveryTasks = await cachedCollection(collections.deliveryTasks);
     // Orders an admin marked "count as fulfilled" (really delivered, wrong status).
     const fulfilledMarks = await loadFulfilledMarks();
     const isMarked = (o: any) => !!o.id && fulfilledMarks.has(o.id) && !/^(delivered|completed)$/i.test(String(o.status || ''));
@@ -156,9 +159,9 @@ async function buildDashboardPayload() {
         dailyTrends[key] = { orders: 0, gmv: 0, netPlatformEarning: 0 };
     }
 
-    // Vendor & delivery performance tracking
+    // Vendor performance tracking (delivery partners are ranked from
+    // computeRiderEarnings below, not from this loop).
     const vendorPerformance: Record<string, { orders: number; revenue: number; name: string }> = {};
-    const deliveryPerformance: Record<string, { deliveries: number; name: string }> = {};
 
     // Helper to safely parse dates
     function parseDate(value: any): Date | null {
@@ -204,15 +207,6 @@ async function buildDashboardPayload() {
             vendorPerformance[order.vendorId].orders += 1;
             vendorPerformance[order.vendorId].revenue += breakdown.subtotal;
         }
-
-        // Delivery partner performance
-        if (order.deliveryPartnerId || order.deliveryPersonId) {
-            const partnerId = order.deliveryPartnerId || order.deliveryPersonId;
-            if (!deliveryPerformance[partnerId]) {
-                deliveryPerformance[partnerId] = { deliveries: 0, name: order.deliveryPartnerName || order.deliveryPersonName || 'Unknown' };
-            }
-            deliveryPerformance[partnerId].deliveries += 1;
-        }
     });
 
     // Round all accumulators
@@ -232,9 +226,15 @@ async function buildDashboardPayload() {
         .sort((a, b) => b.revenue - a.revenue)
         .slice(0, 5);
 
-    const topDeliveryPartners = Object.entries(deliveryPerformance)
-        .map(([id, data]) => ({ deliveryPartnerId: id, ...data }))
-        .sort((a, b) => b.deliveries - a.deliveries)
+    // Ranked by what each rider actually earned — delivery pay (as stamped on
+    // the order), tips and incentives — the same figure the rider app shows.
+    // This used to rank by delivery count and print deliveries × ₹25.
+    const topDeliveryPartners = computeRiderEarnings(
+        allDeliveryTasks, allOrders, allDeliveryDocs,
+        (o) => isFulfilledOrder(o, fulfilledMarks)
+    )
+        .filter(r => r.total > 0)
+        .sort((a, b) => b.total - a.total || b.deliveries - a.deliveries)
         .slice(0, 5);
 
     // Revenue trend
@@ -316,11 +316,16 @@ async function buildDashboardPayload() {
                 online: onlineDeliveryPersons,
                 pending: pendingDeliveryPersons,
                 topPerformers: topDeliveryPartners.map(d => ({
-                    id: d.deliveryPartnerId,
+                    id: d.riderId,
                     name: d.name,
                     totalOrders: d.deliveries,
-                    revenue: d.deliveries * 25, // avg partner earning per delivery
-                    rating: 4.5,
+                    revenue: d.total,
+                    rating: d.rating,
+                    // How `revenue` is made up, for the card's tooltip.
+                    deliveryPay: d.deliveryPay,
+                    tips: d.tips,
+                    incentives: d.incentives,
+                    lastDeliveredAt: d.lastDeliveredAt,
                 })),
             },
 
