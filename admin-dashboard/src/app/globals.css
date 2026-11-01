@@ -1333,17 +1333,19 @@ body {
 }
 
 .sb-category + .sb-category {
-  margin-top: 18px;
+  margin-top: 22px;
 }
 
+/* Level 1 — category caption: small, spaced capitals, quietest colour */
 .sb-category-caption {
-  padding: 0 10px 6px;
-  font-size: 0.66rem;
-  font-weight: 700;
+  padding: 0 10px 8px;
+  font-family: var(--font-display), var(--font-sans);
+  font-size: 0.64rem;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   color: var(--foreground-secondary);
-  opacity: 0.75;
+  opacity: 0.7;
   white-space: nowrap;
 }
 
@@ -1371,9 +1373,12 @@ body {
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: var(--foreground-secondary);
-  font-size: 0.86rem;
-  font-weight: 500;
+  /* Level 2 — group heading: display face, full-strength text */
+  color: var(--foreground);
+  font-family: var(--font-display), var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   text-align: left;
   text-decoration: none;
   cursor: pointer;
@@ -1385,16 +1390,47 @@ body {
   color: var(--foreground);
 }
 
+/* Each group's icon sits on its own tinted tile, so icons read as markers
+   rather than as more text. Tones are set per section below. */
 .sb-section-icon {
-  width: 28px;
-  height: 28px;
+  --sb-tone: var(--foreground-secondary);
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--sb-tone);
+  background: color-mix(in srgb, var(--sb-tone) 13%, transparent);
   transition: background var(--transition-fast), color var(--transition-fast);
 }
+
+.sb-section-btn:hover .sb-section-icon {
+  background: color-mix(in srgb, var(--sb-tone) 20%, transparent);
+}
+
+[data-section="dashboard"]    .sb-section-icon { --sb-tone: #E64A19; }
+[data-section="orders"]       .sb-section-icon { --sb-tone: #2563EB; }
+[data-section="verification"] .sb-section-icon { --sb-tone: #0F766E; }
+[data-section="restaurants"]  .sb-section-icon { --sb-tone: #B45309; }
+[data-section="delivery"]     .sb-section-icon { --sb-tone: #7C3AED; }
+[data-section="customers"]    .sb-section-icon { --sb-tone: #DB2777; }
+[data-section="marketing"]    .sb-section-icon { --sb-tone: #0E7490; }
+[data-section="finance"]      .sb-section-icon { --sb-tone: #15803D; }
+[data-section="reports"]      .sb-section-icon { --sb-tone: #4338CA; }
+[data-section="settings"]     .sb-section-icon { --sb-tone: #475569; }
+
+.dark [data-section="dashboard"]    .sb-section-icon { --sb-tone: #FF8A65; }
+.dark [data-section="orders"]       .sb-section-icon { --sb-tone: #60A5FA; }
+.dark [data-section="verification"] .sb-section-icon { --sb-tone: #2DD4BF; }
+.dark [data-section="restaurants"]  .sb-section-icon { --sb-tone: #FBBF24; }
+.dark [data-section="delivery"]     .sb-section-icon { --sb-tone: #A78BFA; }
+.dark [data-section="customers"]    .sb-section-icon { --sb-tone: #F472B6; }
+.dark [data-section="marketing"]    .sb-section-icon { --sb-tone: #22D3EE; }
+.dark [data-section="finance"]      .sb-section-icon { --sb-tone: #4ADE80; }
+.dark [data-section="reports"]      .sb-section-icon { --sb-tone: #A5B4FC; }
+.dark [data-section="settings"]     .sb-section-icon { --sb-tone: #CBD5E1; }
 
 .sb-section-label {
   flex: 1;
@@ -1413,11 +1449,7 @@ body {
 /* Group that contains the current page */
 .sb-section-btn.has-current {
   color: var(--foreground);
-  font-weight: 600;
-}
-
-.sb-section-btn.has-current .sb-section-icon {
-  color: var(--primary);
+  font-weight: 700;
 }
 
 /* Plain link that IS the current page (Dashboard, Settings) */
@@ -1430,19 +1462,22 @@ body {
 /* Page links inside a group */
 .sb-links {
   list-style: none;
-  margin: 2px 0 6px 21px;
+  margin: 2px 0 8px 23px;
   padding: 0 0 0 10px;
   border-left: 1px solid var(--border);
   overflow: hidden;
 }
 
+/* Level 3 — page links: body face, smaller and quieter than the heading */
 .sb-link {
   position: relative;
   display: block;
-  padding: 7px 10px;
+  padding: 6px 10px;
   margin: 1px 0;
   border-radius: 8px;
-  font-size: 0.82rem;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 400;
   color: var(--foreground-secondary);
   text-decoration: none;
   white-space: nowrap;

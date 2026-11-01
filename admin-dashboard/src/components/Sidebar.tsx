@@ -90,9 +90,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     key={section.id}
                     href={section.href}
                     title={collapsed ? section.label : undefined}
+                    data-section={section.id}
                     className={`sb-section-btn ${isOwner ? 'is-current' : ''}`}
                 >
-                    <span className="sb-section-icon"><Icon size={18} /></span>
+                    <span className="sb-section-icon"><Icon size={17} strokeWidth={2.1} /></span>
                     {!collapsed && <span className="sb-section-label">{section.label}</span>}
                 </Link>
             );
@@ -107,9 +108,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     type="button"
                     title={section.label}
                     onClick={() => openFromRail(section.id)}
+                    data-section={section.id}
                     className={`sb-section-btn ${isOwner ? 'has-current' : ''}`}
                 >
-                    <span className="sb-section-icon"><Icon size={18} /></span>
+                    <span className="sb-section-icon"><Icon size={17} strokeWidth={2.1} /></span>
                 </button>
             );
         }
@@ -120,9 +122,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     type="button"
                     onClick={() => toggleSection(section.id)}
                     aria-expanded={isOpen}
+                    data-section={section.id}
                     className={`sb-section-btn ${isOwner ? 'has-current' : ''}`}
                 >
-                    <span className="sb-section-icon"><Icon size={18} /></span>
+                    <span className="sb-section-icon"><Icon size={17} strokeWidth={2.1} /></span>
                     <span className="sb-section-label">{section.label}</span>
                     <motion.span
                         className="sb-chevron"
