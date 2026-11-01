@@ -104,6 +104,20 @@ async function fetchEndpoint<T>(endpoint: string): Promise<T> {
     return work;
 }
 
+/** What is cached for an endpoint right now, without fetching. */
+export function peekApiCache<T>(endpoint: string): T | undefined {
+    return responseCache.get(endpoint)?.data as T | undefined;
+}
+
+/**
+ * Rewrite a cached response in place — e.g. patch one order inside the cached
+ * order register after it was changed on another page. No-op if not cached.
+ */
+export function updateApiCache<T>(endpoint: string, update: (current: T) => T): void {
+    const entry = responseCache.get(endpoint);
+    if (entry) rememberResponse(endpoint, update(entry.data as T));
+}
+
 /** Drop a cached endpoint so the next read goes to the server. */
 export function invalidateApiCache(endpoint?: string): void {
     if (endpoint) responseCache.delete(endpoint);

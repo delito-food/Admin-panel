@@ -46,6 +46,21 @@ async function handleGET(request: Request) {
         const sinceDate = sinceParam ? new Date(sinceParam) : null;
         const since = sinceDate && !isNaN(sinceDate.getTime()) ? sinceDate : null;
 
+        // ── Single order ──
+        //
+        // `?id=<orderId>` returns that one order, enriched exactly like a row
+        // of the register (same joins, same stage, same discounts), as a single
+        // object rather than an array. The order detail page uses it so that
+        // opening one order costs a handful of reads, not the whole register.
+        const idParam = (searchParams.get('id') || '').trim();
+        if (idParam && (idParam.includes('/') || idParam.length > 200)) {
+            return NextResponse.json({ success: false, error: 'Invalid order id' }, { status: 400 });
+        }
+
+        // Delta and single-order requests know exactly which orders they cover,
+        // so invoice numbers and delivery tasks are fetched by id for them.
+        const targeted = !!since || !!idParam;
+
         // ── Limit ──
         // `limit=all` (or 0) returns the complete order register — the Orders
         // page paginates client-side and needs every row to be present so that
@@ -61,31 +76,40 @@ async function handleGET(request: Request) {
 
         const ordersCollection = () => db.collection(collections.orders);
 
-        let query: FirebaseFirestore.Query;
-        if (since) {
-            query = ordersCollection()
-                .where('createdAt', '>=', Timestamp.fromDate(since))
-                .orderBy('createdAt', 'desc')
-                .limit(limit);
-        } else if (status && status !== 'all') {
-            query = ordersCollection()
-                .where('status', '==', status)
-                .orderBy('createdAt', 'desc')
-                .limit(limit);
+        let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+        if (idParam) {
+            const one = await ordersCollection().doc(idParam).get();
+            if (!one.exists) {
+                return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+            }
+            docs = [one as FirebaseFirestore.QueryDocumentSnapshot];
         } else {
-            query = ordersCollection()
-                .orderBy('createdAt', 'desc')
-                .limit(limit);
+            let query: FirebaseFirestore.Query;
+            if (since) {
+                query = ordersCollection()
+                    .where('createdAt', '>=', Timestamp.fromDate(since))
+                    .orderBy('createdAt', 'desc')
+                    .limit(limit);
+            } else if (status && status !== 'all') {
+                query = ordersCollection()
+                    .where('status', '==', status)
+                    .orderBy('createdAt', 'desc')
+                    .limit(limit);
+            } else {
+                query = ordersCollection()
+                    .orderBy('createdAt', 'desc')
+                    .limit(limit);
+            }
+            docs = (await query.get()).docs;
         }
 
-        const snapshot = await query.get();
-        const orderIds = snapshot.docs.map(doc => doc.id);
+        const orderIds = docs.map(doc => doc.id);
 
         // Invoice numbers issued for these orders (used in the UI and CSV export).
         // In delta mode we know exactly which orders we are reporting on, so we
         // fetch those invoice documents by id instead of downloading every
         // invoice ever issued.
-        const invoiceNumbers = since
+        const invoiceNumbers = targeted
             ? await getInvoiceNumbersFor(orderIds)
             : await getInvoiceNumberMap();
 
@@ -99,7 +123,7 @@ async function handleGET(request: Request) {
         const vendorIds = new Set<string>();
         const nameOnlySet = new Set<string>();
 
-        snapshot.docs.forEach(doc => {
+        docs.forEach(doc => {
             const data = doc.data();
             if (data.deliveryPersonId) deliveryPersonIds.add(data.deliveryPersonId);
             if (data.vendorId) vendorIds.add(data.vendorId);
@@ -129,7 +153,7 @@ async function handleGET(request: Request) {
         const tasksByOrderId: Record<string, { deliveryPersonId: string; deliveryPersonName: string; deliveryPersonPhone: string; dispatchedAt: any; pickedUpAt: any; deliveredAt: any; taskStatus: string; riderAcceptedAt: any; arrivedAtPickupAt: any; arrivedAtCustomerAt: any; sortMs: number }> = {};
 
         let allTasks: Array<{ id: string; [key: string]: any }>;
-        if (since) {
+        if (targeted) {
             const IN_CHUNK = 30;
             const chunks: string[][] = [];
             for (let i = 0; i < orderIds.length; i += IN_CHUNK) {
@@ -237,7 +261,7 @@ async function handleGET(request: Request) {
         // Admin "count as fulfilled" markers (separate collection; order docs untouched).
         const fulfilledMarks = await loadFulfilledMarks();
 
-        const orders = snapshot.docs.map(doc => {
+        const orders = docs.map(doc => {
 
             const data = doc.data();
             let deliveryPersonId = data.deliveryPersonId || null;
@@ -406,6 +430,10 @@ async function handleGET(request: Request) {
                 fulfilledMark: fulfilledMarks.get(doc.id) || null,
             };
         });
+
+        if (idParam) {
+            return NextResponse.json({ success: true, data: orders[0] });
+        }
 
         // ── File export (styled .xlsx by default, CSV on request) ──
         const format = searchParams.get('format');

@@ -144,7 +144,12 @@ const Heading = ({ children, note }: { children: React.ReactNode; note?: React.R
 
 /* ── main ──────────────────────────────────────────────────── */
 
-export function OrderBill({ order }: { order: Order }) {
+/**
+ * `part` renders one block on its own so a page can lay them out separately;
+ * the default renders all three, one after the other.
+ */
+export function OrderBill({ order, part = 'all' }: { order: Order; part?: 'all' | 'items' | 'bill' | 'money' }) {
+    const show = (p: 'items' | 'bill' | 'money') => part === 'all' || part === p;
     const items = order.items ?? [];
 
     // ── Food ──
@@ -215,6 +220,7 @@ export function OrderBill({ order }: { order: Order }) {
     return (
         <>
             {/* ── ITEMS ── */}
+            {show('items') && (
             <div>
                 <Heading note={`${items.length} ${items.length === 1 ? 'item' : 'items'}`}>Ordered items</Heading>
                 <div className="glass-card overflow-hidden" style={{ padding: 0 }}>
@@ -235,8 +241,10 @@ export function OrderBill({ order }: { order: Order }) {
                     )}
                 </div>
             </div>
+            )}
 
             {/* ── CUSTOMER BILL ── */}
+            {show('bill') && (
             <div className="glass-card p-4">
                 <Heading note="how the customer's total is built">Customer bill</Heading>
 
@@ -294,8 +302,10 @@ export function OrderBill({ order }: { order: Order }) {
                 <Row op="=" label="Customer paid" amount={total} strong />
                 {tip > 0 && <Row op="" label="Tip (paid separately)" hint="goes entirely to the rider" amount={tip} tone="green" />}
             </div>
+            )}
 
             {/* ── WHERE THE MONEY WENT ── */}
+            {show('money') && (
             <div className="glass-card p-4">
                 <Heading note={cancelled ? undefined : 'every rupee the customer paid'}>Where the money goes</Heading>
 
@@ -376,6 +386,7 @@ export function OrderBill({ order }: { order: Order }) {
                     </>
                 )}
             </div>
+            )}
         </>
     );
 }
