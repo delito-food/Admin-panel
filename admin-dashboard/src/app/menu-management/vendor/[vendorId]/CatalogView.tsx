@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import type { AdminMenuItem, VendorCategory } from '@/types';
 import {
-    UNCATEGORIZED, effectiveCategoryId, sortCategories, formatINR, postBulkUpdate, VegMark, TriCheckbox,
+    UNCATEGORIZED, effectiveCategoryId, sortCategories, formatINR, postBulkUpdate, VegMark, TriCheckbox, ItemMark,
 } from './menu-shared';
 
 /**
@@ -397,6 +397,7 @@ export default function CatalogView({
                         <p style={{ fontSize: '0.7rem', color: 'var(--foreground-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {catName(effectiveCategoryId(item, knownCatIds))}{item.subCategoryName ? ` · ${item.subCategoryName}` : ''}
                         </p>
+                        {item.itemMark && <div style={{ marginTop: 4, display: 'flex' }}><ItemMark text={item.itemMark} icon={item.itemMarkIcon} size={11} /></div>}
                     </div>
                     {priceTag(item)}
                     <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
@@ -446,6 +447,7 @@ export default function CatalogView({
                     <p style={{ fontSize: '0.72rem', color: 'var(--foreground-secondary)', marginTop: 2 }}>
                         {catName(effectiveCategoryId(item, knownCatIds))}{item.subCategoryName ? ` · ${item.subCategoryName}` : ''}{item.preparationTime ? ` · ${item.preparationTime} min` : ''}
                     </p>
+                    {item.itemMark && <div style={{ marginTop: 3, display: 'flex' }}><ItemMark text={item.itemMark} icon={item.itemMarkIcon} size={11} /></div>}
                 </div>
                 <div style={{ width: 130 }}>{priceTag(item)}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 90 }} onClick={e => e.stopPropagation()}>

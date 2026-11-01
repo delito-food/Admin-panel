@@ -325,6 +325,10 @@ export interface AdminMenuItem {
   discount: number;
   subCategoryName: string;
   tags: string[];
+  /** Admin "item mark": short note shown under the item name in the customer app (icon + text, no background). */
+  itemMark?: string;
+  /** Icon for the item mark — one of ITEM_MARK_ICONS keys (info, star, spicy, leaf, new, time). */
+  itemMarkIcon?: string;
   variants: MenuItemVariant[];
   addOns: MenuItemAddOn[];
   mealCombos: MealCombo[];

@@ -14,6 +14,7 @@ import CatalogView from './CatalogView';
 import PriceManager from './PriceManager';
 import CategoryManager from './CategoryManager';
 import { exportMenuCsv } from './exportMenuCsv';
+import { ITEM_MARK_ICONS, ITEM_MARK_MAX, ItemMark } from './menu-shared';
 import { useRouter } from 'next/navigation';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -191,6 +192,9 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
                 price: Number(itemForm.price),
                 discount: Number(itemForm.discount || 0),
                 preparationTime: Number(itemForm.preparationTime || 15),
+                // Item mark: empty text clears both fields so nothing shows in the app.
+                itemMark: (itemForm.itemMark || '').trim().slice(0, ITEM_MARK_MAX),
+                itemMarkIcon: (itemForm.itemMark || '').trim() ? (itemForm.itemMarkIcon || 'info') : '',
             };
 
             const method = payload.itemId ? 'PATCH' : 'POST';
@@ -491,6 +495,53 @@ export default function VendorMenuManagement({ params }: { params: Promise<{ ven
                                                 <div>
                                                     <label className="block text-xs font-bold mb-2 text-[var(--foreground-secondary)] uppercase tracking-wider">Mouth-watering Description</label>
                                                     <textarea className="input w-full resize-y bg-[var(--surface-hover)] text-sm font-medium leading-relaxed border-transparent focus:border-[var(--primary)] transition-all px-5 py-4 rounded-xl" value={itemForm.description || ''} onChange={e => setItemForm({...itemForm, description: e.target.value})} placeholder="Describe the ingredients, taste, and what makes it special..." rows={3} />
+                                                </div>
+
+                                                {/* Item mark — icon + short text shown under the item name in the customer app */}
+                                                <div>
+                                                    <div className="flex items-baseline justify-between mb-2">
+                                                        <label className="block text-xs font-bold text-[var(--foreground-secondary)] uppercase tracking-wider">Item Mark</label>
+                                                        {itemForm.itemMark ? (
+                                                            <button type="button" onClick={() => setItemForm({ ...itemForm, itemMark: '', itemMarkIcon: '' })} className="text-xs text-[var(--foreground-secondary)] hover:text-red-500">Clear</button>
+                                                        ) : (
+                                                            <span className="text-xs text-[var(--foreground-secondary)]">Optional</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex items-center">
+                                                            {ITEM_MARK_ICONS.map(({ key, label, Icon }) => {
+                                                                const active = (itemForm.itemMarkIcon || 'info') === key;
+                                                                return (
+                                                                    <button
+                                                                        key={key}
+                                                                        type="button"
+                                                                        title={label}
+                                                                        aria-label={label}
+                                                                        aria-pressed={active}
+                                                                        onClick={() => setItemForm({ ...itemForm, itemMarkIcon: key })}
+                                                                        className="p-1.5 transition-colors"
+                                                                        style={{ color: active ? 'var(--primary)' : 'var(--foreground-secondary)', opacity: active ? 1 : 0.55 }}
+                                                                    >
+                                                                        <Icon size={16} strokeWidth={active ? 2.4 : 2} />
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <input
+                                                            type="text"
+                                                            className="input flex-1 min-w-0 bg-transparent border-[var(--border)] text-sm px-3 py-2 rounded-lg"
+                                                            value={itemForm.itemMark || ''}
+                                                            maxLength={ITEM_MARK_MAX}
+                                                            onChange={e => setItemForm({ ...itemForm, itemMark: e.target.value })}
+                                                            placeholder="e.g. Contains peanuts"
+                                                        />
+                                                    </div>
+                                                    {(itemForm.itemMark || '').trim() && (
+                                                        <div className="mt-2 flex items-center gap-2 text-xs text-[var(--foreground-secondary)]">
+                                                            <span>Preview:</span>
+                                                            <ItemMark text={itemForm.itemMark} icon={itemForm.itemMarkIcon || 'info'} size={12} />
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <div className="grid grid-cols-2 gap-5">

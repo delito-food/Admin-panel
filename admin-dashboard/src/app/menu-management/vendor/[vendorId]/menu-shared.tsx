@@ -6,6 +6,7 @@
  */
 
 import type { AdminMenuItem, VendorCategory } from '@/types';
+import { Info, Star, Flame, Leaf, Sparkles, Clock, type LucideIcon } from 'lucide-react';
 
 export const UNCATEGORIZED = '__uncategorized__';
 
@@ -80,6 +81,35 @@ export async function postBulkUpdate(vendorId: string, updates: BulkUpdate[], so
     } catch {
         return { success: false, error: 'Network error' };
     }
+}
+
+/**
+ * Item mark icons. Keys are stored in Firestore (menuItems.itemMarkIcon) and
+ * mapped to the same pictures in the customer app (app/.../ItemMark.kt) — keep
+ * both lists in sync.
+ */
+export const ITEM_MARK_ICONS: { key: string; label: string; Icon: LucideIcon }[] = [
+    { key: 'info', label: 'Info', Icon: Info },
+    { key: 'star', label: 'Star', Icon: Star },
+    { key: 'spicy', label: 'Spicy', Icon: Flame },
+    { key: 'leaf', label: 'Leaf', Icon: Leaf },
+    { key: 'new', label: 'New', Icon: Sparkles },
+    { key: 'time', label: 'Time', Icon: Clock },
+];
+
+export const ITEM_MARK_MAX = 32;
+
+/** Icon + text, no background — how the mark looks in the customer app. */
+export function ItemMark({ text, icon, size = 12, color = 'var(--foreground-secondary)' }: { text?: string; icon?: string; size?: number; color?: string }) {
+    const label = (text || '').trim();
+    if (!label) return null;
+    const Icon = (ITEM_MARK_ICONS.find(i => i.key === icon) || ITEM_MARK_ICONS[0]).Icon;
+    return (
+        <span title={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color, fontSize: size, fontWeight: 500, minWidth: 0, maxWidth: '100%' }}>
+            <Icon size={size} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        </span>
+    );
 }
 
 export function VegMark({ isVeg, size = 12 }: { isVeg: boolean; size?: number }) {
